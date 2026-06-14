@@ -1,0 +1,40 @@
+package com.rimo.traceableprint;
+
+import com.rimo.traceableprint.config.Config;
+import com.rimo.traceableprint.entity.FootprintEntity;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.MobCategory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class Common {
+	public static final String MOD_ID = "traceableprint";
+	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+
+	// 模组可调参数单例（静态持有，后续接配置文件/界面时只换读写端）
+	public static final Config CONFIG = new Config();
+
+	// 父生物“最后一个脚印”的链尾指针改为服务端 mixin 的 @Unique 字段 + NBT 持久化，
+	// 不再经 LivingEntity 的 SynchedEntityData 同步：26.1 的 ClassTreeIdRegistry 下，
+	// 向被 Mob 等大量原版子类继承的基类新增同步字段会与其在自身 clinit 里固化的 id 撞号
+	// （Mob.DATA_MOB_FLAGS_ID 已是 id 15）。客户端“是否链尾”验证改由 FootprintEntity.IS_TAIL 承载。
+
+	// 脚印实体类型的注册表键（26.1 的 EntityType.Builder.build 需要 ResourceKey）
+	public static final ResourceKey<EntityType<?>> FOOTPRINT_KEY = ResourceKey.create(
+			Registries.ENTITY_TYPE, Identifier.fromNamespaceAndPath(MOD_ID, "footprint"));
+
+	// Define entity type
+	public static final EntityType<FootprintEntity> FOOTPRINT = EntityType.Builder
+			.<FootprintEntity>of(FootprintEntity::new, MobCategory.MISC)
+			.sized(0.75f, 0.1f) // 判定范围：薄薄一层贴在地面
+			.updateInterval(10) // 不需要同步太多数据
+			.clientTrackingRange(6) // 实体同步距离：6 区块（96 格）内玩家可见脚印出现与状态变化，作为寻踪线索稍远一些更合适
+			.build(FOOTPRINT_KEY);
+
+	public static void init() {
+		// Platform-specific registration happens in loaders
+	}
+}

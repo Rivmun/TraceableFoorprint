@@ -5,7 +5,7 @@ plugins {
 val minecraft = property("deps.minecraft") as String;
 
 loom {
-    //accessWidenerPath = rootProject.file("src/main/resources/${property("mod.id")}.unobf.accesswidener")
+    accessWidenerPath = rootProject.file("src/main/resources/${property("mod.id")}.unobf.accesswidener")
 }
 
 tasks.named<ProcessResources>("processResources") {
@@ -29,7 +29,7 @@ tasks.named<ProcessResources>("processResources") {
 
         this["version_range"] = prop("version_range")
 
-        //this["access_widener"] = "${prop("mod.id")}.unobf.accesswidener"
+        this["access_widener"] = "${prop("mod.id")}.unobf.accesswidener"
 
         // insert version-specific mixins
 
@@ -62,7 +62,9 @@ dependencies {
 
 tasks {
     processResources {
-        exclude("**/neoforge.mods.toml", "**/mods.toml", "**/*.accesswidener")
+        // 只排除 named 版 AW（与本 unobf 构建无关），保留 traceableprint.unobf.accesswidener 随包发布，
+        // 供 Fabric 运行期按 fabric.mod.json 的 accessWidener 字段加载（loom-no-remap 不会自动回注）。
+        exclude("**/neoforge.mods.toml", "**/mods.toml", "**/${project.property("mod.id")}.accesswidener")
     }
 }
 
