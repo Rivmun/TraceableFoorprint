@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "${mod_id}",
+  "version": "${mod_version}",
+  "name": "${mod_name}",
+  "description": "${mod_description}",
+  "authors": [
+    "${mod_author}"
+  ],
+  "contributors": [
+    "${mod_contributor}"
+  ],
+  "contact": {
+    "homepage": "${mod_homepage}",
+    "sources": "${mod_sources}",
+    "issues": "${mod_issues}"
+  },
+  "license": "${mod_license}",
+  "icon": "${mod_icon}.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "${mod_group}.${mod_id}.loaders.fabric.Platform"
+    ],
+    "client": [
+      "${mod_group}.${mod_id}.loaders.fabric.Platform\u0024ClientInit"
+    ],
+    "server": [
+      "${mod_group}.${mod_id}.loaders.fabric.Platform\u0024ServerInit"
+    ],
+    "modmenu": [
+      "${mod_group}.${mod_id}.loaders.fabric.ModMenuEntryPoint"
+    ]
+  },
+  "mixins": [
+    "${mod_id}.mixins.json"
+  ],
+  "depends": {
+    "fabric-api": "*",
+    "minecraft": "${version_range}"
+  },
+  "suggests": {
+    "modmenu": "*"
+  },
+  "custom": {
+    "modmenu": {
+      "links": {
+        "modmenu.modrinth": "${mod_modrinth}",
+        "MCMOD.cn": "${mod_mcmod}"
+      }
+    }
+  }
+}
