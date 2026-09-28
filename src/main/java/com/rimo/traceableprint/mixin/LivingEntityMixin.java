@@ -9,6 +9,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.TagKey;
 import net.minecraft.util.Mth;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -21,7 +23,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import java.util.Set;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -44,7 +46,7 @@ public abstract class LivingEntityMixin {
 	// 尝试生成脚印的固定间隔（tick）由 Common.CONFIG.getSpawnIntervalTicks() 提供，此处只做倒计时
 	@Unique private int traceableprint$footprintCooldown = 0;
 	@Unique private boolean traceableprint$wasOnGround = true;
-	// 记录上一次检测时的位置，用真实位移判断“是否在移动”（玩家服务端 deltaMovement 不可靠）
+	// 记录上一次检测时的位置，只用真实位移判断“是否在移动”（方向另走速度，见 spawnFootprint）
 	@Unique private double traceableprint$lastCheckX;
 	@Unique private double traceableprint$lastCheckZ;
 	@Unique private boolean traceableprint$lastCheckInit = false;
@@ -72,14 +74,15 @@ public abstract class LivingEntityMixin {
 		}
 		double cx = entity.getX();
 		double cz = entity.getZ();
-		// 用两次检测间隔内的真实位移平方判断移动（阈值 0.01≈0.1 格），比 getDeltaMovement() 对玩家更可靠
+		// 用两次检测间隔内的真实位移平方判断移动（阈值 0.01≈0.1 格）：
+		// “是否真的在走”只认位移，不认速度——顶墙/撞船壁时速度仍非零但根本没位移
 		double dx = this.traceableprint$lastCheckInit ? cx - this.traceableprint$lastCheckX : 0.0;
 		double dz = this.traceableprint$lastCheckInit ? cz - this.traceableprint$lastCheckZ : 0.0;
 		boolean moving = (dx * dx + dz * dz) > 1.0E-2;
 		// 触发条件（参照 FootprintParticle）：A. 贴地且有水平移动；B. 落地瞬间
 		boolean justLanded = !this.traceableprint$wasOnGround && entity.onGround();
 		if ((moving && entity.onGround()) || justLanded) {
-			// 把真实位移方向传入，用于计算脚印 yaw（比玩家服务端 getDeltaMovement 更准）
+			// 位移一并传入：速度近零（骑船、被推挤、落地瞬间已减速）时作为方向兜底
 			traceableprint$spawnFootprint(entity, new Vec3(dx, 0.0, dz));
 		}
 		this.traceableprint$lastCheckX = cx;
@@ -101,15 +104,24 @@ public abstract class LivingEntityMixin {
 	}
 
 	/**
-	 * 尝试生成脚印：区块加载检查 → 朝向/身后落点解算 → 落地方块判定 → 最小间距过滤
+	 * 尝试生成脚印：生成闸门（潜行 / 隐形 / 生物名单）→ 区块加载检查 → 朝向/身后落点解算 → 落地方块判定 → 最小间距过滤
 	 * → 创建实体并串链（回写上一脚印 NEXT，再把父实体链尾更新为新脚印）→ addFreshEntity。
 	 * 判定/间距不通过时不产生任何副作用（不腾位、不改链尾）。
 	 *
-	 * @param movementHint 调用方提供的真实位移方向（玩家服务端 getDeltaMovement 不可靠）；为零向量时回退实体自身速度
+	 * @param movementHint 区间真实位移，作速度失效（骑乘/推挤已减速）时的兜底方向；零向量表示忽略
 	 */
 	@Unique
 	private void traceableprint$spawnFootprint(LivingEntity parent, Vec3 movementHint) {
 		if (!(parent.level() instanceof ServerLevel world)) return;
+
+		// 生成闸门：放在唯一入口，移动/跳跃两条触发路径一并生效
+		// 1) 潜行（蹲走）一律不留脚印（无开关：潜行本身就是“轻手轻脚”的语义，与配置无关）
+		if (parent.isCrouching()) return;
+		// 2) 隐形实体是否留脚印交给配置（关=隐身者真正无痕；开=隐身≠无迹可寻）
+		if (!Common.CONFIG.isPrintsForInvisible() && traceableprint$isInvisible(parent)) return;
+		// 3) 生物名单：未反转=黑名单（名单内不留），反转=白名单（仅名单内留）。
+		//    两种语义等价于“命中状态与反转标志不一致就跳过”（空名单=无人命中，故黑名单放行一切、白名单拦住一切）
+		if (traceableprint$isListedEntity(parent) != Common.CONFIG.isEntityListInverted()) return;
 
 		// 检查父实体所在区块是否已加载
 		if (!world.getChunkSource().hasChunk(
@@ -118,22 +130,48 @@ public abstract class LivingEntityMixin {
 			return;
 		}
 
-		// 计算移动朝向：优先用真实位移，其次实体自身速度，最后回退实体朝向
+		// 计算移动朝向：优先用实体本 tick 速度（瞬时方向，转弯跟手，不再滞后一整个生成间隔）。
+		// 26.1 起玩家移动改为客户端只上传 Input、服务端 travel() 模拟，travelInAir/travelInFluid/travelFlying
+		// 均会写 deltaMovement，故速度对玩家同样有效（旧版“玩家服务端速度不可靠”的前提已不成立）；
+		// 速度近零（骑船/马等非操控座骑、被推挤后已停下）时回退区间真实位移，再不行回退实体自身朝向。
 		// 方向向量与 yaw 的关系：dir = (-sin(yaw), 0, cos(yaw))，反推 yaw = atan2(-x, z)
-		Vec3 movement = movementHint.horizontalDistanceSqr() > 1.0E-4 ? movementHint : parent.getDeltaMovement();
+		// （注意 atan2 的第一个参数取 -x：MC 的 yaw 顺时针为正，与数学极角不同）
+		Vec3 velocity = parent.getDeltaMovement();
+		Vec3 movement = velocity.horizontalDistanceSqr() > 1.0E-4 ? velocity : movementHint;
 		float targetYaw = parent.getYRot();
 		if (movement.horizontalDistanceSqr() > 1.0E-4) {
 			targetYaw = (float) Math.toDegrees(Math.atan2(-movement.x, movement.z));
 		}
 
 		// 脚印放在父实体身后约 0.35 格处，贴地放置（抬高量走配置，减少与地面 z-fight）
+		//【朝向】MC 实体 yaw 的前进向量是 (-sin(yaw), cos(yaw))（yaw=0 朝南 +Z、yaw=-90 朝东 +X），
+		// 所以“身后”是 +sin / -cos；写成 -sin / -cos 会把 X 分量镜像，导致东西走向时脚印落在身前。
 		double rad = Math.toRadians(targetYaw);
-		double behindX = parent.getX() - Math.sin(rad) * 0.35;
+		double behindX = parent.getX() + Math.sin(rad) * 0.35;
 		double behindZ = parent.getZ() - Math.cos(rad) * 0.35;
-		double footY = parent.getY() + Common.CONFIG.getFootprintYOffset() / 100.0;
+		double footY = parent.getY() + Common.CONFIG.getFootprintYOffset();
 
-		// 生成位置预检：落脚格实心→否则回退下一格完整方块；判定通过前绝不改动任何状态
-		if (!traceableprint$resolveSpawnPosition(world, behindX, footY, behindZ)) {
+		// 左右脚偏移：沿垂直于行进方向的侧向（前进 dir=(-sin,cos) 的法向 (cos,sin)）平移，随机取正负模拟左/右脚；
+		// 前后偏移：沿前进方向 dir=(-sin,cos) 平移，随机取正负（前/后错落）；两者同时、独立随机，直接烘入实体真实坐标，
+		// 使贴图在实体中居中的同时碰撞箱/交互随之偏移。
+		// 幅度优先取逐生物覆写表（按注册名 namespace:path 精确匹配，不匹配标签）命中条目的 float（取绝对值），
+		// 未命中则回退全局默认；无论读到正负都重新随机符号。
+		String mobId = BuiltInRegistries.ENTITY_TYPE.getKey(parent.getType()).toString();
+		Float customSide = Common.CONFIG.findSideOffset(mobId);
+		Float customForward = Common.CONFIG.findForwardOffset(mobId);
+		double sideMagnitude = customSide != null ? Math.abs(customSide) : Common.CONFIG.getFootprintSideOffset();
+		double forwardMagnitude = customForward != null ? Math.abs(customForward) : Common.CONFIG.getFootprintForwardOffset();
+		double sideSign = parent.getRandom().nextBoolean() ? 1.0 : -1.0;
+		double sideOffset = sideMagnitude * sideSign;
+		double forwardSign = parent.getRandom().nextBoolean() ? 1.0 : -1.0;
+		double forwardOffset = forwardMagnitude * forwardSign;
+		double spawnX = behindX + Math.cos(rad) * sideOffset - Math.sin(rad) * forwardOffset;
+		double spawnZ = behindZ + Math.sin(rad) * sideOffset + Math.cos(rad) * forwardOffset;
+
+		// 生成位置预检：落脚格实心→否则回退下一格完整方块；命中 blockHeight 表的落脚方块再叠加额外 Y 抬升（避免被非完整方块遮挡）
+		// 判定通过前绝不改动任何状态；spawnY 为 NaN 表示取消生成
+		double spawnY = traceableprint$resolveSpawnY(world, spawnX, footY, spawnZ);
+		if (Double.isNaN(spawnY)) {
 			return;
 		}
 
@@ -143,19 +181,23 @@ public abstract class LivingEntityMixin {
 		// 最小间距：与上一个脚印（若仍在世界）过近则跳过，防原地跳跃/慢蹭刷屏（上一脚印卸载/取不到则放行）
 		double minDist = Common.CONFIG.getMinSpawnDistance();
 		if (minDist > 0 && lastId != null && world.getEntity(lastId) instanceof FootprintEntity prevFp) {
-			double ddx = prevFp.getX() - behindX;
-			double ddz = prevFp.getZ() - behindZ;
+			double ddx = prevFp.getX() - spawnX;
+			double ddz = prevFp.getZ() - spawnZ;
 			if (ddx * ddx + ddz * ddz < minDist * minDist) {
 				return;
 			}
 		}
 
 		FootprintEntity footprint = new FootprintEntity(world, parentId);
-		footprint.setPos(behindX, footY, behindZ);
+		footprint.setPos(spawnX, spawnY, spawnZ);
 		footprint.setYRot(targetYaw);
 		footprint.setXRot(parent.getXRot());
-		// 视觉左右错开 ±0.15 方块，模拟左右脚
-		footprint.setVisualOffset(parent.getRandom().nextBoolean() ? 0.15 : -0.15);
+		// 脚印贴图缩放（对齐参考工程 getEntityScale）：逐生物列表倍率（按注册名匹配）× 幼体 0.66 × 实体自身 getScale()；
+		// 服务端算好后走同步数据下发，客户端仅缩放贴图四边形，不改实体碰撞箱/交互。
+		float texScale = Common.CONFIG.resolveSizeMultiplier(mobId);
+		if (parent.isBaby()) texScale *= 0.66F;
+		texScale *= parent.getScale();
+		footprint.setTexScale(texScale);
 		// 新脚印即当前链尾
 		footprint.setChainTail(true);
 
@@ -169,6 +211,17 @@ public abstract class LivingEntityMixin {
 		this.traceableprint$lastFootprint = footprint.getUUID().toString();
 	}
 
+	/**
+	 * 隐形判定：隐身效果（喷药/生物自带）或实体自身的 invisible 标志（setInvisible）。
+	 * 不用 isInvisibleTo(Player)：那个随观看者而变（创造玩家对生存玩家隐形等），
+	 * 而“脚印该不该存在”必须是服务端客观事实。
+	 * 1.20.1 里 hasEffect 收裸 MobEffect、MobEffects.INVISIBILITY 同名，源码写法一致，无需 stonecutter 分支。
+	 */
+	@Unique
+	private static boolean traceableprint$isInvisible(LivingEntity parent) {
+		return parent.isInvisible() || parent.hasEffect(MobEffects.INVISIBILITY);
+	}
+
 	@Unique
 	private static UUID traceableprint$parseUuid(String str) {
 		if (str == null || str.isEmpty()) return null;
@@ -180,33 +233,89 @@ public abstract class LivingEntityMixin {
 	}
 
 	/**
-	 * 生成位置判定（一比一复刻 FootprintParticle）：
-	 * 1) 落脚格：方块允许生成 且 canOcclude → 成功；
-	 * 2) 否则回退下一格：方块允许生成 且 canOcclude 且碰撞形状为完整方块 → 成功；
-	 * 3) 都失败 → 取消生成。保证脚印落在实体方块表面而不陷进草丛。
+	 * 生成位置判定 + 抬高解算（复刻 FootprintParticle 落脚规则，并叠加 blockHeight 额外抬升）：
+	 * 1) 落脚格：方块允许生成 且 canOcclude → 用该格，Y 叠加其 blockHeight；
+	 * 2) 否则回退下一格：方块允许生成 且 canOcclude 且碰撞形状为完整方块 → 用该格，Y 叠加其 blockHeight；
+	 * 3) 都失败 → 返回 {@link Double#NaN} 取消生成。
+	 * blockHeight 用于雪层/灵魂沙/泥等视觉高于碰撞箱的方块：实体踩上去下沉，脚印需相应抬高以免被遮挡。
 	 */
 	@Unique
-	private static boolean traceableprint$resolveSpawnPosition(ServerLevel world, double x, double footY, double z) {
+	private static double traceableprint$resolveSpawnY(ServerLevel world, double x, double footY, double z) {
 		BlockPos probe = BlockPos.containing(x, footY, z);
 		BlockState state = world.getBlockState(probe);
 		if (traceableprint$isBlockAllowed(world, probe) && state.canOcclude()) {
-			return true;
+			return footY + traceableprint$blockHeightOffset(world, probe);
 		}
 		BlockPos below = probe.below();
 		BlockState belowState = world.getBlockState(below);
-		return traceableprint$isBlockAllowed(world, below) && belowState.canOcclude()
-				&& Block.isShapeFullBlock(belowState.getCollisionShape(world, below));
+		if (traceableprint$isBlockAllowed(world, below) && belowState.canOcclude()
+				&& Block.isShapeFullBlock(belowState.getCollisionShape(world, below))) {
+			return footY + traceableprint$blockHeightOffset(world, below);
+		}
+		return Double.NaN;
 	}
 
 	/**
-	 * 方块允许判定：白名单(支持 "#tag")优先；其后硬度门槛 |defaultDestroyTime| < gate。
+	 * 查方块额外抬高表（blockHeightList）：命中返回该条目 float，未命中/非法返回 0。
+	 * 条目支持 "namespace:path" 精确匹配与 "#namespace:tag" 标签匹配两种写法，首个命中即生效。
+	 */
+	@Unique
+	private static double traceableprint$blockHeightOffset(ServerLevel world, BlockPos pos) {
+		List<String> list = Common.CONFIG.getBlockHeightList();
+		if (list.isEmpty()) return 0.0;
+		BlockState block = world.getBlockState(pos);
+		String id = BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString();
+		for (String entry : list) {
+			int comma = entry.indexOf(',');
+			if (comma < 0) continue;
+			String key = entry.substring(0, comma).trim();
+			boolean match;
+			if (key.startsWith("#")) {
+				match = false;
+				for (TagKey<Block> tag : block.typeHolder().tags().toList()) {
+					if (key.equals("#" + tag.location())) { match = true; break; }
+				}
+			} else {
+				match = key.equals(id);
+			}
+			if (match) {
+				try {
+					return Double.parseDouble(entry.substring(comma + 1).trim());
+				} catch (NumberFormatException e) {
+					return 0.0; // float 部分非法：不抬高
+				}
+			}
+		}
+		return 0.0;
+	}
+
+	/**
+	 * 生物名单命中判定（与方块白名单同构）：实体类型ID "namespace:path" 或 "#namespace:tag" 标签任一命中即为命中。
+	 * 本方法只回答“在不在名单里”，黑名单/白名单语义由 Config.isEntityListInverted() 决定。
+	 * 标签走 typeHolder().tags()（与方块的 state.typeHolder().tags() 同一套机制，可写 #minecraft:undead 这类分组）。
+	 */
+	@Unique
+	private static boolean traceableprint$isListedEntity(LivingEntity parent) {
+		List<String> list = Common.CONFIG.getEntityList();
+		if (list.isEmpty()) return false; // 空名单快通道：免做注册表查表与标签遍历
+		if (list.contains(BuiltInRegistries.ENTITY_TYPE.getKey(parent.getType()).toString())) return true;
+		for (TagKey<EntityType<?>> tag : parent.typeHolder().tags().toList()) {
+			if (list.contains("#" + tag.location())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * 方块允许判定：白名单(支持 "#tag") 优先；其后硬度门槛 |defaultDestroyTime| < gate。
 	 */
 	@Unique
 	private static boolean traceableprint$isBlockAllowed(ServerLevel world, BlockPos pos) {
 		BlockState block = world.getBlockState(pos);
 		String id = BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString();
 		Holder<Block> holder = block.typeHolder();
-		Set<String> apply = Common.CONFIG.getApplyBlocks();
+		List<String> apply = Common.CONFIG.getApplyBlocks();
 
 		boolean canGen = apply.contains(id);
 		if (!canGen) {

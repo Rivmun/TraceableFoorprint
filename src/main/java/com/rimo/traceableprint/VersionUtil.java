@@ -61,4 +61,29 @@ public class VersionUtil {
 		player.sendOverlayMessage(message);
 		//? }
 	}
+
+	/**
+	 * 原版“准星选中方块”线框的线宽：跟随窗口缩放，高分辨率下不会细到看不见。
+	 * 新版取自 WindowRenderState#appropriateLineWidth（每帧由窗口缩放算出）；
+	 * 旧版（1.20.1）原版用的是固定线宽 0.0075。
+	 */
+	public static float getBlockOutlineLineWidth() {
+		//? if <= 1.20.1 {
+		/*return 0.0075F;
+		*///? } else {
+		return Minecraft.getInstance().gameRenderer.getGameRenderState().windowRenderState.appropriateLineWidth;
+		//? }
+	}
+
+	/**
+	 * 玩家是否开启“高对比度方块外框”无障碍选项（与原版选中框行为对齐）。
+	 * 旧版（1.20.1）尚无此选项，按未开启处理。
+	 */
+	public static boolean isHighContrastBlockOutline() {
+		//? if <= 1.20.1 {
+		/*return false;
+		*///? } else {
+		return Minecraft.getInstance().options.highContrastBlockOutline().get();
+		//? }
+	}
 }

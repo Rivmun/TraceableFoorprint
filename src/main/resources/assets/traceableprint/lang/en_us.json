@@ -1,4 +1,5 @@
 {
   "entity.traceableprint.footprint": "Footprint",
-  "traceableprint.message.be_tracked": "Someone is tracking you..."
+  "traceableprint.message.be_tracked": "Someone is tracking you...",
+  "traceableprint.message.own_footprints": "Seems it's your own trail..."
 }

@@ -14,8 +14,8 @@ public class Common {
 	public static final String MOD_ID = "traceableprint";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
-	// 模组可调参数单例（静态持有，后续接配置文件/界面时只换读写端）
-	public static final Config CONFIG = new Config();
+	// 模组可调参数单例：构造后立即从 config/traceableprint.json 载入（不存在则写出默认）
+	public static final Config CONFIG = new Config().load();
 
 	// 父生物“最后一个脚印”的链尾指针改为服务端 mixin 的 @Unique 字段 + NBT 持久化，
 	// 不再经 LivingEntity 的 SynchedEntityData 同步：26.1 的 ClassTreeIdRegistry 下，

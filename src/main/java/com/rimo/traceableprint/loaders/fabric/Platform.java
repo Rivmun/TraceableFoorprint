@@ -4,6 +4,7 @@ package com.rimo.traceableprint.loaders.fabric;
 import com.rimo.traceableprint.Client;
 import com.rimo.traceableprint.Common;
 import com.rimo.traceableprint.DedicatedServer;
+import com.rimo.traceableprint.VersionUtil;
 import com.rimo.traceableprint.entity.FootprintEntityRenderer;
 import net.fabricmc.api.*;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -24,7 +25,7 @@ public class Platform implements ModInitializer {
 		Common.init();
 		// 注册脚印实体类型到内置注册表（Registries.ENTITY_TYPE 现在是 ResourceKey，实例在 BuiltInRegistries）
 		Registry.register(BuiltInRegistries.ENTITY_TYPE,
-				Identifier.fromNamespaceAndPath(Common.MOD_ID, "footprint"), Common.FOOTPRINT);
+				VersionUtil.getId("footprint"), Common.FOOTPRINT);
 		Common.LOGGER.info("[TraceablePrint] Footprint entity registered");
 	}
 
