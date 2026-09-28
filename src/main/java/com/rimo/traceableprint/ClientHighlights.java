@@ -16,15 +16,36 @@ import net.minecraft.world.entity.LivingEntity;
  *   若目标在服务端数据里本来就在发光（全局可见），直接跳过，避免到期时误关别人的原生高亮。
  *
  * 高亮是仅点击者可见的纯客户端本地状态，不经任何网络包；实体尚未进入本客户端追踪范围时高亮会丢失（可接受）。
+ *
+ * 全局同时只允许一个高亮：点亮新目标前先把上一个高亮实体（脚印/父生物）恢复常规状态。
  */
 public final class ClientHighlights {
+	// 当前高亮实体 id（仅客户端有意义；集成服双端同 JVM，靠 apply 只在客户端侧调用保证不串）
+	private static int highlightedId = -1;
+
 	private ClientHighlights() {
 	}
 
+	/**
+	 * 点亮目标（限同时仅一个）：先把上一个高亮实体恢复常规，再点亮新目标；
+	 * 重复点击同一目标不熄灭，仅续期。
+	 */
 	public static void apply(ClientLevel level, int entityId, int durationTicks) {
 		if (durationTicks <= 0) return;
 		Entity entity = level.getEntity(entityId);
 		if (entity == null || entity.isRemoved()) return;
+
+		// 排他：上一个高亮不是本次目标时先熄灭，回常规状态
+		if (highlightedId != -1 && highlightedId != entityId) {
+			Entity previous = level.getEntity(highlightedId);
+			if (previous instanceof FootprintEntity footprint) {
+				footprint.clearClientHighlight();
+			} else if (previous instanceof ClientHighlightHolder holder) {
+				holder.clearClientHighlight();
+			}
+			// 上一目标已不在本地副本（移出追踪范围/被移除）：其客户端本地状态随实体一同消亡，无需处理
+		}
+		highlightedId = entityId;
 
 		if (entity instanceof FootprintEntity footprint) {
 			footprint.applyClientHighlight(durationTicks);

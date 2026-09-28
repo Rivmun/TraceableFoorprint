@@ -17,8 +17,9 @@ import net.minecraft.util.LightCoordsUtil;
  * 碰撞箱(EntityType.sized)与贴图解耦；贴图沿实体 yaw 旋转、左右脚偏移、UUID 派生高度抖动。
  *
  * 高亮：走自定义脉冲管线（见 FootprintRenderTypes，core/footprint_pulse 在 footprint 原色与纯白间随时间闪烁，
- *   关深度穿墙、不采样光照）。非高亮：走公共 RenderTypes.entityCutout，采样世界 lightmap
+ *   关深度穿墙、不采样光照）。非高亮：走公共 RenderTypes.entityTranslucent，采样世界 lightmap
  *   实现天光昼夜变暗；顶点 UV2 把方块光锁 0 只留天光（规避火把暖光/红色 overlay 行导致的偏红）。
+ *   非高亮选 translucent 而非 cutout：仅启用 alpha 混合才能把顶点 alpha 当不透明度用，实现存活末段渐淡。
  */
 public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, FootprintEntityRenderer.FootprintRenderState> {
 	// 贴图水平尺寸（局部：x=左右，z=前后/朝
@@ -46,6 +47,8 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		state.highlighted = entity.isHighlighted();
 		// 全局同步的脉冲相位：用世界游戏时间（+插值）而非实体年龄，让所有高亮脚印同步闪烁
 		state.gameTime = entity.level().getGameTime() + tickDelta;
+		// 存续淡出：剩余时长不足总时长一半时线性变透明（min(1, 剩余/(总/2))）
+		state.fadeAlpha = Math.max(0.0F, Math.min(1.0F, entity.getFadeAlpha()));
 		// 从脚印自身 UUID 派生稳定高度抖动（0~0.02），避免多脚印层叠 z-fight
 		state.renderYOffset = ((entity.getUUID().getLeastSignificantBits() & 0xFF) / 255.0F) * 0.02F;
 	}
@@ -62,17 +65,19 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		// 沿实体“右侧”做视觉偏移（碰撞箱保持在移动轨迹中线上）
 		poseStack.translate(state.visualOffsetX, 0.0F, 0.0F);
 
-		// 单个四边形：非高亮走原版实体剪裁管线（采样 lightmap、应用天光、被方块遮挡）；
+		// 单个四边形：非高亮走原版实体半透明管线（采样 lightmap、应用天光、被方块遮挡、支持 alpha 混合）；
 		// 高亮走自定义脉冲管线（关深度穿墙、原色↔纯白闪烁、不受光照）。
 		// 光照：非高亮保留实体当前天光，把方块光通道锁 0（LightCoordsUtil.withBlock(...,0)）→ 白天亮、夜里暗、不偏红。
-		// 顶点 alpha：非高亮=255（entityCutout 会乘 alpha，低于 255 会变半透明）；高亮=脉冲值（由 fsh 当插值因子）。
+		// 顶点 alpha：非高亮=淡出系数×255（entityTranslucent 启用 SRC_ALPHA 混合，顶点 alpha 作为不透明度与背景叠加，
+		// 实现“越接近自动销毁越透明”；cutout 无混合、此值无效，故必须走 translucent）；高亮=脉冲值（由 fsh 当插值因子）。
 		int light = LightCoordsUtil.withBlock(state.lightCoords, 0);
 		if (state.highlighted) {
 			float pulse = (float) ((Math.sin(state.gameTime * 0.15) + 1.0) * 0.5); // 0..1 往复
 			int vertexAlpha = (int) (pulse * 255.0F);
 			drawFootprintQuad(poseStack, submitNodeCollector, FootprintRenderTypes.footprintSeeThrough(), light, vertexAlpha);
 		} else {
-			drawFootprintQuad(poseStack, submitNodeCollector, FootprintRenderTypes.footprint(), light, 255);
+			int fadeAlpha = (int) (state.fadeAlpha * 255.0F);
+			drawFootprintQuad(poseStack, submitNodeCollector, FootprintRenderTypes.footprint(), light, fadeAlpha);
 		}
 
 		poseStack.popPose();
@@ -80,7 +85,7 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 
 	/**
 	 * 提交一张脚印四边形。
-	 * 非高亮的 entityCutout 顶点格式含 UV1(overlay)/UV2(light)/Normal，必须显式给出：
+	 * 非高亮的 entityTranslucent 顶点格式含 UV1(overlay)/UV2(light)/Normal，必须显式给出：
 	 * - setLight(light)：UV2 = 仅天光（block 锁 0），供 lightmap 采样得到昼夜亮度；
 	 * - setOverlay(OverlayTexture.NO_OVERLAY)：走透明 overlay 行，避免 (0,0) 红色行导致偏红（历史坑）；
 	 * - setNormal(0,1,0)：地面向上法线，供实体方向光计算。
@@ -112,5 +117,6 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		public float renderYOffset;
 		public boolean highlighted;
 		public double gameTime;
+		public float fadeAlpha;
 	}
 }

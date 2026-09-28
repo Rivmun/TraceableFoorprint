@@ -52,12 +52,17 @@ public class FootprintEntity extends Entity {
 	// 故下放到我们完全掌控的 FootprintEntity 自身，随实体同步。
 	private static final EntityDataAccessor<Boolean> IS_TAIL =
 			SynchedEntityData.defineId(FootprintEntity.class, EntityDataSerializers.BOOLEAN);
+	// 生成时的绝对游戏时间（服务端 level 时钟），走同步数据：
+	// 服务端 tick 据此判定过期自毁，客户端渲染器据此计算淡出透明度。
+	private static final EntityDataAccessor<Long> GEN_TIME =
+			SynchedEntityData.defineId(FootprintEntity.class, EntityDataSerializers.LONG);
 
 	// 高亮倒计时：纯客户端本地状态（谁点击谁知道），由交互直接写入、客户端 tick 递减，驱动渲染器金色脉冲。
 	private int clientHighlightTicks = 0;
 
-	// 生成时的绝对游戏时间（服务端 level 时钟），持久化到 NBT；服务端 tick 据此判定过期自毁。
-	private long genTime;
+	// 从存档读入的生成时间：仅当读入时机早于 entityData 就绪时兜底，
+	// 首次服务端 tick 补写（正常路径在 readAdditionalSaveData / 构造器已直接写入）。
+	private Long pendingGenTime;
 
 	// 支撑探测深度：从脚印实体位置正下方向下探测支撑方块的深度（供存续检测用）。
 	private static final double SUPPORT_PROBE_DEPTH = 0.2;
@@ -65,13 +70,16 @@ public class FootprintEntity extends Entity {
 	public FootprintEntity(EntityType<? extends Entity> type, Level level) {
 		super(type, level);
 		this.setNoGravity(true); // 脚印悬于地面之上，不受重力
-		this.genTime = level.getLevelData().getGameTime();
+		// GEN_TIME 在首次服务端 tick 播种为当前游戏时间（构造期 entityData 尚未就绪）
 	}
 
 	// 供服务端生成时调用的便捷构造
 	public FootprintEntity(ServerLevel level, UUID parentId) {
 		this(Common.FOOTPRINT, level);
 		this.setParentUUID(parentId);
+		// super() 返回后 entityData 已就绪，构造时直接播种生成时间
+		// （不能留到 tickCount==0 再播种：baseTick 会先把 tickCount 递增到 1，首帧判断永远不命中）
+		this.entityData.set(GEN_TIME, level.getLevelData().getGameTime());
 	}
 
 	@Override
@@ -81,6 +89,7 @@ public class FootprintEntity extends Entity {
 		builder.define(NEXT_UUID, "");
 		builder.define(VISUAL_OFFSET, 0.0F);
 		builder.define(IS_TAIL, false);
+		builder.define(GEN_TIME, 0L);
 	}
 
 	public void setParentUUID(UUID uuid) {
@@ -126,6 +135,26 @@ public class FootprintEntity extends Entity {
 		return this.entityData.get(VISUAL_OFFSET);
 	}
 
+	// 生成时的绝对游戏时间（双端可读，走同步数据）
+	public long getGenTime() {
+		return this.entityData.get(GEN_TIME);
+	}
+
+	/**
+	 * 存续淡出系数：透明度 = min(1, 剩余时长 / (总时长 / 2))。
+	 * 前一半生命保持完全不透明，后一半线性淡出至全透明（客户端渲染用）。
+	 */
+	public float getFadeAlpha() {
+		long genTime = this.getGenTime();
+		if (genTime <= 0) return 1.0F; // 尚未播种（客户端首帧可能先于同步数据到达），按完全不透明处理
+		long lifetime = Common.CONFIG.getFootprintLifetimeTicks();
+		if (lifetime <= 0) return 1.0F;
+		long half = lifetime / 2;
+		if (half <= 0) return 1.0F;
+		long remaining = genTime + lifetime - this.level().getLevelData().getGameTime();
+		return Math.min(1.0F, (float) remaining / (float) half);
+	}
+
 	// 是否处于高亮状态（仅客户端有意义：读本地倒计时，服务端永远为 false）
 	public boolean isHighlighted() {
 		return this.clientHighlightTicks > 0;
@@ -140,6 +169,15 @@ public class FootprintEntity extends Entity {
 		}
 	}
 
+	/**
+	 * 清除客户端本地高亮（排他切换：点亮其它脚印时回到常规渲染管线）。
+	 */
+	public void clearClientHighlight() {
+		if (this.level().isClientSide()) {
+			this.clientHighlightTicks = 0;
+		}
+	}
+
 	// 26.1 的 NBT 读写改成了 ValueInput / ValueOutput 流式接口
 	@Override
 	protected void readAdditionalSaveData(ValueInput input) {
@@ -148,8 +186,15 @@ public class FootprintEntity extends Entity {
 		parseUuid(input.getStringOr("NextUUID", ""))
 				.ifPresent(this::setNextUUID);
 		this.setVisualOffset(input.getDoubleOr("VisualOffsetX", 0.0D));
-		// 恢复生成时间；缺失时按“当前时刻”兜底，避免因无字段而立即自毁
-		this.genTime = input.getLongOr("GenTime", this.level().getLevelData().getGameTime());
+		// 恢复生成时间：entityData 此时已就绪则直接写入；
+		// 缺失时按“当前时刻”兜底，避免因无字段而立即自毁
+		long genTime = input.getLongOr("GenTime", this.level().getLevelData().getGameTime());
+		try {
+			this.entityData.set(GEN_TIME, genTime);
+		} catch (IllegalStateException e) {
+			// 极端情况：读档时机早于同步数据构建，缓到首次服务端 tick 补写
+			this.pendingGenTime = genTime;
+		}
 	}
 
 	@Override
@@ -157,7 +202,7 @@ public class FootprintEntity extends Entity {
 		output.putString("ParentUUID", getParentUUID().map(UUID::toString).orElse(""));
 		output.putString("NextUUID", getNextUUID().map(UUID::toString).orElse(""));
 		output.putDouble("VisualOffsetX", getVisualOffsetX());
-		output.putLong("GenTime", this.genTime);
+		output.putLong("GenTime", this.getGenTime());
 	}
 
 	// 26.1 的 Entity.interact 是 (Player, InteractionHand, Vec3) 三参数签名
@@ -208,9 +253,15 @@ public class FootprintEntity extends Entity {
 			return;
 		}
 		// 服务端：过期自毁（每秒一次）——超时即销毁，无需检查方块，省开销
+		// 兜底补写：仅当播种路径未生效（GEN_TIME 仍为默认 0）时写入，不依赖 tickCount 首帧时序
+		if (this.getGenTime() <= 0) {
+			long now = this.level().getLevelData().getGameTime();
+			this.entityData.set(GEN_TIME, this.pendingGenTime != null ? this.pendingGenTime : now);
+			this.pendingGenTime = null;
+		}
 		if (this.tickCount % 20 == 0) {
 			long now = this.level().getLevelData().getGameTime();
-			if (now > this.genTime + Common.CONFIG.getFootprintLifetimeTicks()) {
+			if (now > this.getGenTime() + Common.CONFIG.getFootprintLifetimeTicks()) {
 				this.discard();
 				return;
 			}

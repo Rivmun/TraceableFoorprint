@@ -9,4 +9,7 @@ package com.rimo.traceableprint;
 public interface ClientHighlightHolder {
 	/** 写入客户端本地高亮剩余 tick（>0 表示 glowing 由本客户端点亮，mixin tick 负责到期熄灭与重断言） */
 	void setClientHighlightTicks(int ticks);
+
+	/** 清除客户端本地高亮：倒计时归零并立即熄灭 glowing（仅限本客户端点亮的，不碰服务端原生发光） */
+	void clearClientHighlight();
 }

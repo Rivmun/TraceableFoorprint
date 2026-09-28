@@ -13,9 +13,11 @@ import java.util.Optional;
 /**
  * 脚印的两个渲染类型。
  *
- * 非高亮：直接用公共 {@link RenderTypes#entityCutout(Identifier)} —— 它走会采样世界 lightmap 的 entity 管线，
+ * 非高亮：用公共 {@link RenderTypes#entityTranslucent(Identifier)} —— 同样走会采样世界 lightmap 的 entity 管线，
  *   配合顶点 UV2 把方块光通道锁 0（见 FootprintEntityRenderer），得到“白天亮、夜里随天光变暗、且不受火把暖光(不偏红)”
- *   的正常遮挡效果。零自定义代码。
+ *   的效果。**必须用 translucent 而非 cutout**：cutout 只开深度测试不开 alpha 混合，顶点 alpha 再低也会写回
+ *   完全不透明的像素（只能靠 discard 硬切边），故“按存活时间渐淡”在 cutout 上天然无效；translucent 启用
+ *   SRC_ALPHA 混合，顶点 alpha 才真正与背景叠加。零自定义代码。
  *
  * 高亮：自定义 RenderType，用自定义着色器对 core/footprint_pulse（在 footprint 原色与纯白之间
  *   随时间脉冲闪烁），关深度测试 → 穿墙；不采样 lightmap → 不受世界光照（高亮本就无视光照）。
@@ -34,9 +36,9 @@ public final class FootprintRenderTypes {
 	private static final Identifier PULSE_SHADER =
 			Identifier.fromNamespaceAndPath(Common.MOD_ID, "core/footprint_pulse");
 
-	/** 非高亮：会应用天光、被方块正常遮挡的原版实体剪裁渲染类型。 */
+	/** 非高亮：应用天光、被方块正常遮挡、且支持顶点 alpha 渐淡的原版实体半透明渲染类型。 */
 	public static RenderType footprint() {
-		return RenderTypes.entityCutout(TEXTURE);
+		return RenderTypes.entityTranslucent(TEXTURE);
 	}
 
 	/** 高亮：穿墙原色↔纯白脉冲闪烁，懒注册。 */

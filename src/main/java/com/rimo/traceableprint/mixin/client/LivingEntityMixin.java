@@ -40,6 +40,16 @@ public abstract class LivingEntityMixin {
 		this.traceableprint$clientHighlightTicks = ticks;
 	}
 
+	// ClientHighlightHolder 的实现：排他切换时清除本客户端高亮并立即熄灭。
+	// 仅当倒计时>0（确认 glowing 由本客户端点亮）才写 flag，不误关服务端原生发光。同样必须 public。
+	@Unique public void traceableprint$clearClientHighlight() {
+		if (this.traceableprint$clientHighlightTicks <= 0) return;
+		this.traceableprint$clientHighlightTicks = 0;
+		LivingEntity entity = (LivingEntity) (Object) this;
+		if (!entity.level().isClientSide()) return; // 集成服务端逻辑侧同一份织入代码，须按侧守卫
+		((EntityAccessor) entity).traceableprint$setSharedFlag(6, false);
+	}
+
 	// 桥接 Entity#setSharedFlag（protected）：由接口型访问器 EntityAccessor 提供实现（@Mixin(Entity.class)，
 	// @Invoker 不能跨类定位到父类方法，故不能写在 LivingEntity 的 mixin 里）
 
