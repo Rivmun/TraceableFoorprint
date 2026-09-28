@@ -2,12 +2,15 @@ package com.rimo.traceableprint.entity;
 
 import com.rimo.traceableprint.ClientHighlights;
 import com.rimo.traceableprint.Common;
+import com.rimo.traceableprint.VersionUtil;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -66,6 +69,11 @@ public class FootprintEntity extends Entity {
 
 	// 支撑探测深度：从脚印实体位置正下方向下探测支撑方块的深度（供存续检测用）。
 	private static final double SUPPORT_PROBE_DEPTH = 0.2;
+
+	// 被追踪提示的节流窗口（tick）：同一链尾脚印在此期间重复被点击只提示一次，防刷。
+	private static final int TRACE_NOTIFY_COOLDOWN_TICKS = 200;
+	// 下次允许提示的绝对游戏时间（仅服务端使用，无需同步/持久化）。
+	private long traceNotifyReadyTime = 0L;
 
 	public FootprintEntity(EntityType<? extends Entity> type, Level level) {
 		super(type, level);
@@ -209,12 +217,45 @@ public class FootprintEntity extends Entity {
 	@Override
 	public @NonNull InteractionResult interact(@NonNull Player player, @NonNull InteractionHand hand, net.minecraft.world.phys.@NonNull Vec3 location) {
 		// 交互在客户端完全封闭：链数据取 SynchedEntityData 本地副本，高亮是仅点击者可见的本地状态。
-		// 主手本地调用直接 CONSUME，客户端不再重试副手；服务端不参与交互裁决。
+		// 主手本地调用直接 CONSUME，客户端不再重试副手。
 		if (this.level() instanceof ClientLevel level) {
 			this.traceAndHighlight(level);
 			return InteractionResult.CONSUME;
 		}
+		// 服务端：右键实体的包本就会送达服务端并回调此处（客户端返回 CONSUME 只阻止副手重试，不拦服务端）。
+		// 在此权威地判定“本次点击是否把人追到了父玩家”，若是则向被追踪者发 action bar 提示。
+		// 非模组客户端可能主/副手各发一包，故只认主手。
+		if (hand == InteractionHand.MAIN_HAND) {
+			this.notifyParentIfTraced((ServerPlayer) player);
+		}
 		return InteractionResult.PASS;
+	}
+
+	/**
+	 * 服务端：若本次点击把足迹链追到了“父玩家”（本脚印为链尾、无存活后继、且父 UUID 对应一名在线玩家），
+	 * 则给该玩家一条 action bar 提示“有人正在追踪你…”。带节流，不显示追踪者身份。
+	 * 走服务端权威的 isChainTail/NEXT/PARENT 同步数据 + 全局按 UUID 查玩家，不受追踪者客户端渲染距离限制。
+	 */
+	private void notifyParentIfTraced(ServerPlayer tracer) {
+		if (!Common.CONFIG.isNotifyTraced()) return;
+		// 仅当链上无存活后继、且自己确为链尾时，本次点击才会“跳向父实体”（与客户端 traceAndHighlight 判定一致）
+		if (hasLiveNext() || !this.isChainTail()) return;
+		UUID parentId = this.getParentUUID().orElse(null);
+		if (parentId == null) return;
+		ServerPlayer target = this.level().getServer().getPlayerList().getPlayer(parentId);
+		if (target == null || target == tracer) return; // 无此在线玩家 / 单人自追：静默
+		long now = this.level().getGameTime();
+		if (now < this.traceNotifyReadyTime) return; // 节流窗口内，忽略重复点击
+		this.traceNotifyReadyTime = now + TRACE_NOTIFY_COOLDOWN_TICKS;
+		// 经 VersionUtil 封装 action bar 发送（26.1 为 ServerPlayer#sendOverlayMessage，旧版自动回退 displayClientMessage）。
+		VersionUtil.sendActionBar(target, Component.translatable("traceableprint.message.be_tracked"));
+	}
+
+	// 本脚印是否仍有存活的直接后继（有则本次点击只推进到下一个脚印，尚未追到人）。
+	private boolean hasLiveNext() {
+		UUID next = this.getNextUUID().orElse(null);
+		if (next == null) return false;
+		return this.level().getEntity(next) instanceof FootprintEntity fp && !fp.isRemoved();
 	}
 
 	/**

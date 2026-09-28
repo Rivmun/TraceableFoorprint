@@ -6,6 +6,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 //~ if < 1.21.11 'Identifier' -> 'ResourceLocation'
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 
 import static com.rimo.traceableprint.Common.MOD_ID;
@@ -45,6 +46,19 @@ public class VersionUtil {
 		/*player.displayClientMessage(Component.nullToEmpty(message), false);
 		*///? } else {
 		player.sendSystemMessage(Component.nullToEmpty(message));
+		//? }
+	}
+
+	/**
+	 * 向指定玩家发一条 action bar（快捷栏上方）消息。
+	 * 旧版（<= 1.21.11）走 Player#displayClientMessage(component, true)；
+	 * 新版已拆分为 ServerPlayer#sendOverlayMessage(component)。
+	 */
+	public static void sendActionBar(ServerPlayer player, Component message) {
+		//? if <= 1.21.11 {
+		/*player.displayClientMessage(message, true);
+		*///? } else {
+		player.sendOverlayMessage(message);
 		//? }
 	}
 }

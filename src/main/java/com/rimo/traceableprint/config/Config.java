@@ -18,6 +18,7 @@ public class Config {
 	public static final int DEFAULT_HIGHLIGHT_TICKS = 200;             // 单次点击的高亮时长（tick，10 秒）
 	public static final int DEFAULT_FOOTPRINT_Y_OFFSET = 1;            // 脚印抬高量（百分之一方块，避免与地面 z-fight）
 	public static final float DEFAULT_HARDNESS_GATE = 3.0F;            // 硬度门槛：|defaultDestroyTime| < gate 才可生成
+	public static final boolean DEFAULT_NOTIFY_TRACED = true;          // 被追踪提示开关：服务端在有人追到链尾时给父玩家发 action bar 提示
 
 	private long footprintLifetimeTicks = DEFAULT_FOOTPRINT_LIFETIME_TICKS;
 	private double minSpawnDistance = DEFAULT_MIN_SPAWN_DISTANCE;
@@ -25,6 +26,7 @@ public class Config {
 	private int highlightTicks = DEFAULT_HIGHLIGHT_TICKS;
 	private int footprintYOffset = DEFAULT_FOOTPRINT_Y_OFFSET;
 	private float hardnessGate = DEFAULT_HARDNESS_GATE;
+	private boolean notifyTraced = DEFAULT_NOTIFY_TRACED;
 
 	// 生成白名单（方块ID "namespace:path"，或 "#namespace:tag" 标签）：命中即跳过硬度判定直接放行，优先级最高
 	private final Set<String> applyBlocks = new HashSet<>();
@@ -70,6 +72,14 @@ public class Config {
 	}
 	public void setHardnessGate(float gate) {
 		this.hardnessGate = Math.max(0, gate);
+	}
+
+	/** 被追踪提示开关（多人服务器：有人通过脚印追到你时，向被追踪者发 action bar 提示） */
+	public boolean isNotifyTraced() {
+		return notifyTraced;
+	}
+	public void setNotifyTraced(boolean notifyTraced) {
+		this.notifyTraced = notifyTraced;
 	}
 
 	public void addApplyBlock(String idOrTag) {

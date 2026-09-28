@@ -1,3 +1,4 @@
 {
-  "entity.traceableprint.footprint": "脚印"
+  "entity.traceableprint.footprint": "脚印",
+  "traceableprint.message.be_tracked": "有人在寻找你的踪迹…"
 }
