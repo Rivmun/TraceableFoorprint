@@ -71,6 +71,13 @@ public class ConfigScreen {
 				.setSaveConsumer(CONFIG::setHighlightTicks)
 				.build());
 
+		// 方向指示粒子与高亮时长同居“交互反馈”语义区，紧跟其后；纯客户端本地生效
+		cat.addEntry(eb.startBooleanToggle(t("option.directionParticles"), CONFIG.isShowDirectionParticles())
+				.setDefaultValue(Config.DEFAULT_SHOW_DIRECTION_PARTICLES)
+				.setTooltip(t("option.directionParticles.@Tooltip"))
+				.setSaveConsumer(CONFIG::setShowDirectionParticles)
+				.build());
+
 		// 生物名单：黑名单还是白名单由下面的反转开关决定，两者配在同屏相邻位置便于对照
 		cat.addEntry(eb.startBooleanToggle(t("option.entityListInverted"), CONFIG.isEntityListInverted())
 				.setDefaultValue(Config.DEFAULT_ENTITY_LIST_INVERTED)

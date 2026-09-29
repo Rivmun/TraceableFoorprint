@@ -88,9 +88,11 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		state.fadeAlpha = Math.clamp(entity.getFadeAlpha(), 0.0F, 1.0F);
 		// 存续下沉：按整段生命线性插值（与 fadeAlpha 的“后半段才淡出”是两条独立曲线，但同源于存续进度）
 		state.renderY = Mth.lerp(entity.getLifeProgress(), RENDER_Y_AT_BIRTH, RENDER_Y_AT_DEATH);
-		// 瞄准判定框：与原版选中方块同源——直接读 Minecraft#hitResult（每客户端 tick 更新一次，
-		// 故框随准星的滞后与原版方块框一致），命中实体为本脚印时才画
-		state.aimed = Minecraft.getInstance().hitResult instanceof EntityHitResult hit && hit.getEntity() == entity;
+		// 瞄准判定框：与原版选中方块同源，仅当“当前确实可被选中（isPickable）”且准星命中的是本脚印时才画。
+		// hitResult 每客户端 tick 才刷新一次（框随准星的滞后与原版方块框一致），故再补一道 isPickable() 实时门：
+		// 切到手持物品/开始潜行的那一帧框立即消失，不必等下一 tick。
+		state.aimed = entity.isPickable()
+				&& Minecraft.getInstance().hitResult instanceof EntityHitResult hit && hit.getEntity() == entity;
 		if (state.aimed) {
 			// 世界系 AABB → 渲染局部系（减去插值位置），并微量外扩防底边与地面共面闪
 			Vec3 pos = entity.getPosition(tickDelta);

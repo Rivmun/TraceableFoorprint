@@ -29,8 +29,13 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * LivingEntity 服务端侧注入：脚印生成（跳跃/移动检测）、链尾指针维护与持久化。
+ * LivingEntity 服务端侧注入：脚印生成（移动/落地检测）、链尾指针维护与持久化。
  * 客户端侧的本地高亮在 mixin.client.LivingEntityMixin，两边各归各的加载段。
+ *
+ * 注：早期版本曾在 jumpFromGround 离地瞬间额外留一印（参考工程 FootprintParticle 的做法），
+ * 但它会被下一次落地生成的最小间距闸门（minSpawnDistance，默认 5 格）挡住：
+ * 普通跳跃起跳→落地点间距总小于阈值，于是“落地脚印永远不生成”，链只剩起跳印。
+ * 现已删除起跳生成，只保留移动/落地两条触发（见 onTick 的 A/B 条件）。
  *
  * 架构（去 FootprintManager 后）：
  * - 父生物链尾 UUID 仅服务端维护（mixin @Unique 字段 + NBT 持久化）：
@@ -58,16 +63,8 @@ public abstract class LivingEntityMixin {
 
 	// 默认左右/前后偏移幅度（方块）：不再开放给玩家配置，硬编码于此；逐生物覆写表命中时优先用表值，
 	// 二者最终都乘综合缩放倍率（见 spawnFootprint 里的 footprintScale）。
-	@Unique private static final double traceableprint$DEFAULT_SIDE_OFFSET = 0.3;
+	@Unique private static final double traceableprint$DEFAULT_SIDE_OFFSET = 0.15;
 	@Unique private static final double traceableprint$DEFAULT_FORWARD_OFFSET = 0.0;
-
-	// 跳跃：离地瞬间额外留一个脚印（不受冷却限制，与 FootprintParticle 参考工程一致）
-	@Inject(method = "jumpFromGround", at = @At("TAIL"))
-	private void traceableprint$onJump(CallbackInfo ci) {
-		LivingEntity entity = (LivingEntity) (Object) this;
-		if (entity.level().isClientSide()) return;
-		traceableprint$spawnFootprint(entity, Vec3.ZERO);
-	}
 
 	@Inject(method = "tick", at = @At("TAIL"))
 	private void traceableprint$onTick(CallbackInfo ci) {
@@ -121,7 +118,7 @@ public abstract class LivingEntityMixin {
 	private void traceableprint$spawnFootprint(LivingEntity parent, Vec3 movementHint) {
 		if (!(parent.level() instanceof ServerLevel world)) return;
 
-		// 生成闸门：放在唯一入口，移动/跳跃两条触发路径一并生效
+		// 生成闸门：放在唯一入口，onTick 的移动/落地两条触发路径一并生效
 		// 0) 模组总开关：禁用直接返回；仅玩家档下非玩家实体一律不留（其余闸门对玩家档同样生效）
 		Config.WorkMode enableMod = Common.CONFIG.getEnableMod();
 		if (enableMod == Config.WorkMode.DISABLED) return;

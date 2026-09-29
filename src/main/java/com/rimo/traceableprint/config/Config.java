@@ -36,6 +36,7 @@ public class Config {
 	public static final float DEFAULT_FOOTPRINT_TEXTURE_SIZE = 0.3125F;  // 脚印贴图默认尺寸（方块，正方形边长），5/16 = 匹配原版像素大小；逐生物缩放表在此基础上再乘
 	public static final float DEFAULT_HARDNESS_GATE = 3.0F;            // 硬度门槛：|defaultDestroyTime| < gate 才可生成
 	public static final boolean DEFAULT_NOTIFY_TRACED = true;          // 被追踪提示开关：服务端在有人追到链尾时给父玩家发 action bar 提示
+	public static final boolean DEFAULT_SHOW_DIRECTION_PARTICLES = true; // 方向指示粒子开关：被点击的脚印每秒向下一目标飘一颗紫色小粒子（纯客户端视觉）
 	public static final boolean DEFAULT_PRINTS_FOR_INVISIBLE = true;   // 隐形实体（隐身效果 / invisible 标志）是否仍留脚印
 	public static final boolean DEFAULT_ENTITY_LIST_INVERTED = false;  // 生物名单反转：关=名单作黑名单，开=名单作白名单
 	public static final WorkMode DEFAULT_ENABLE_MOD = WorkMode.ALL;       // 模组总开关默认档：所有生物（仍受方块过滤/生物名单约束）
@@ -48,6 +49,7 @@ public class Config {
 	private float footprintTextureSize = DEFAULT_FOOTPRINT_TEXTURE_SIZE;
 	private float hardnessGate = DEFAULT_HARDNESS_GATE;
 	private boolean notifyTraced = DEFAULT_NOTIFY_TRACED;
+	private boolean showDirectionParticles = DEFAULT_SHOW_DIRECTION_PARTICLES;
 	private boolean printsForInvisible = DEFAULT_PRINTS_FOR_INVISIBLE;
 	private boolean entityListInverted = DEFAULT_ENTITY_LIST_INVERTED;
 	// 模组总开关（三档）：所有生物 / 仅玩家 / 禁用
@@ -184,6 +186,18 @@ public class Config {
 	}
 	public void setNotifyTraced(boolean notifyTraced) {
 		this.notifyTraced = notifyTraced;
+	}
+
+	/**
+	 * 方向指示粒子开关：开启时，被右键的脚印在高亮时长内每秒向“下一个脚印/父实体”飘出一颗
+	 * END_ROD 紫色粒子（末影之眼同款，沿速度方向拉成短拖尾），指明下一目标在哪。
+	 * 发射者是被点击的脚印（而非被点亮的目标）；纯客户端本地视觉，不经任何网络。
+	 */
+	public boolean isShowDirectionParticles() {
+		return showDirectionParticles;
+	}
+	public void setShowDirectionParticles(boolean showDirectionParticles) {
+		this.showDirectionParticles = showDirectionParticles;
 	}
 
 	/**
@@ -427,6 +441,36 @@ public class Config {
 		}
 	}
 
+	/**
+	 * 将当前实例序列化为 JSON 字符串（与 {@link #save()} 用同一 GSON，含缩进）。
+	 * 供配置上传功能把客户端本地配置打包经网络发往服务端。
+	 */
+	public String serializeJson() {
+		return GSON.toJson(this);
+	}
+
+	/**
+	 * 解析上传来的 JSON 并回填到当前实例，成功返回 {@code true}。
+	 * 解析失败/空串返回 {@code false} 且不改动现有值（落盘由调用方决定）。
+	 * 注意：Gson 按 {@code name()} 反序列化 {@link WorkMode}；未出现的键保持默认，天然向后兼容。
+	 */
+	public boolean applyJson(String json) {
+		if (json == null || json.isEmpty()) {
+			return false;
+		}
+		try {
+			Config parsed = GSON.fromJson(json, Config.class);
+			if (parsed == null) {
+				return false;
+			}
+			this.copyFrom(parsed);
+			return true;
+		} catch (JsonParseException e) {
+			Common.LOGGER.error("[TraceablePrint] Failed to parse uploaded config JSON", e);
+			return false;
+		}
+	}
+
 	/** 把已反序列化的 {@code src} 各字段值覆写进本实例（集合直接引用其新实例）。 */
 	private void copyFrom(Config src) {
 		this.footprintLifetimeTicks = src.footprintLifetimeTicks;
@@ -437,6 +481,7 @@ public class Config {
 		this.footprintTextureSize = src.footprintTextureSize;
 		this.hardnessGate = src.hardnessGate;
 		this.notifyTraced = src.notifyTraced;
+		this.showDirectionParticles = src.showDirectionParticles;
 		this.printsForInvisible = src.printsForInvisible;
 		this.entityListInverted = src.entityListInverted;
 		this.enableMod = src.enableMod;

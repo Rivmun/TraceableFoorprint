@@ -1,4 +1,4 @@
-package com.rimo.traceableprint;
+package com.rimo.traceableprint.util;
 
 /**
  * 由 mixin.client.LivingEntityMixin 通过 @Implements 注入到 LivingEntity 的客户端高亮接口。

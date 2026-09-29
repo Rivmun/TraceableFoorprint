@@ -1,11 +1,12 @@
 package com.rimo.traceableprint.entity;
 
-import com.rimo.traceableprint.ClientHighlights;
+import com.rimo.traceableprint.util.ClientHighlights;
 import com.rimo.traceableprint.Common;
 import com.rimo.traceableprint.VersionUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -25,6 +26,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jspecify.annotations.NonNull;
 
@@ -68,6 +70,9 @@ public class FootprintEntity extends Entity {
 	// 高亮倒计时：纯客户端本地状态（谁点击谁知道），由交互直接写入、客户端 tick 递减，驱动渲染器金色脉冲。
 	private int clientHighlightTicks = 0;
 
+	// 方向指示倒计时：写在“被点击”的本脚印上（而非被点亮的那个），交互时一次写入、客户端 tick 递减。
+	private int directionTicks = 0;
+
 	// 从存档读入的生成时间：仅当读入时机早于 entityData 就绪时兜底，
 	// 首次服务端 tick 补写（正常路径在 readAdditionalSaveData / 构造器已直接写入）。
 	private Long pendingGenTime;
@@ -76,9 +81,23 @@ public class FootprintEntity extends Entity {
 	private static final double SUPPORT_PROBE_DEPTH = 0.2;
 
 	// 被追踪提示的节流窗口（tick）：同一链尾脚印在此期间重复被点击只提示一次，防刷。
-	private static final int TRACE_NOTIFY_COOLDOWN_TICKS = 200;
+	private static final int TRACE_NOTIFY_COOLDOWN_TICKS = 60;
 	// 下次允许提示的绝对游戏时间（仅服务端使用，无需同步/持久化）。
 	private long traceNotifyReadyTime = 0L;
+
+	// - - - 方向指示粒子（纯客户端视觉，由被点击的脚印发射） - - -
+	// 喷发间隔（tick）：点击即时放出首颗，其后每秒一颗，持续整个高亮时长
+	private static final int DIRECTION_PARTICLE_INTERVAL_TICKS = 20;
+	// 缓慢飘飞初速（方块/tick）：END_ROD 沿传入速度拖成长条飞行、自带淡出，低量级慢飘而指路
+	private static final double DIRECTION_PARTICLE_SPEED = 0.08;
+	// 当前发射源脚印 id（仅客户端有意义，对齐 ClientHighlights.highlightedId 的排他模式：
+	// 存 id 不存引用，发射源移出本地副本/被移除时引用随实体自然消亡，静态字段零泄漏）
+	private static int activeDirectionEmitterId = -1;
+
+	// 脚印最大渲染距离（方块）：超出后脚印在屏幕上已小到看不清，直接不渲染以省开销。
+	// 注意 shouldRenderAtSqrDistance 的入参是“距离的平方”（Minecraft 为避免开方传平方值），
+	// 故下面比较的是 RENDER_DISTANCE_BLOCKS 的平方，别把平方当成格数写错阈值。
+	private static final double RENDER_DISTANCE_BLOCKS = 64.0;
 
 	public FootprintEntity(EntityType<? extends Entity> type, Level level) {
 		super(type, level);
@@ -247,6 +266,8 @@ public class FootprintEntity extends Entity {
 	// 26.1 的 Entity.interact 是 (Player, InteractionHand, Vec3) 三参数签名
 	@Override
 	public @NonNull InteractionResult interact(@NonNull Player player, @NonNull InteractionHand hand, net.minecraft.world.phys.@NonNull Vec3 location) {
+		// 潜行/手持物品时的“对射线透明”已上移到 isPickable()，从拾取阶段源头放行
+		// （潜行或主手有物 → 本脚印根本选不中，interact 不会被调），故此处不再重复潜行判断。
 		// 交互在客户端完全封闭：链数据取 SynchedEntityData 本地副本，高亮是仅点击者可见的本地状态。
 		// 主手本地调用直接 CONSUME，客户端不再重试副手。
 		if (this.level() instanceof ClientLevel level) {
@@ -302,29 +323,82 @@ public class FootprintEntity extends Entity {
 	}
 
 	/**
-	 * 依链寻踪（纯客户端）：沿 NEXT_UUID 在本地副本中前进一格，点亮下一个仍存活的脚印；
-	 * 无后继/后继已消失时，仅当“父实体记录的链尾正是自己”才跳向父实体（断链验证）——
-	 * 否则说明后继是被炸断的悬空指针，静默跳过，避免从断链中段错误地跳到父实体。
-	 * 未被追踪的实体不在客户端副本里，自然取不到，同样静默。
+	 * 解析本脚印的寻踪目标（纯客户端）：沿 NEXT_UUID 取本地副本中仍存活的下一个脚印；
+	 * 无后继/后继已消失时，仅当“自己确为链尾”才指向父实体（断链验证，与 traceAndHighlight 同一套规则）。
+	 * 父实体是本地玩家自己时不算目标（第一人称下指向自己无意义，服务端另有文字提示）。
+	 * 交互点亮与方向指示粒子共用本方法，保证“高亮谁”与“烟迹指哪”永远一致。
 	 */
-	private void traceAndHighlight(ClientLevel level) {
-		Entity target = null;
+	private Entity resolveTraceTarget(ClientLevel level) {
 		Entity next = this.getNextUUID().map(level::getEntity).orElse(null);
 		if (next instanceof FootprintEntity nextFootprint && !nextFootprint.isRemoved()) {
-			target = nextFootprint;
-		} else if (this.isChainTail()) {
+			return nextFootprint;
+		}
+		if (this.isChainTail()) {
 			// 仅当自己确为链尾时，才跳向父实体（否则为被炸断的悬空中段，静默跳过）
-			// 父实体是自己时不高亮（第一人称下描边无意义）：服务端已给点击者一条“这是你自己的足迹”提示，文字提示足够。
 			// 26.1 的 ClientLevel 已不再有 player 字段（只有 players() 列表），本地玩家取 Minecraft#player；
 			// 本方法只在客户端分支被调（instanceof ClientLevel 已守卫），取不到玩家时为 null，不影响判等。
 			Entity parent = this.getParentUUID().map(level::getEntity).orElse(null);
 			if (parent instanceof LivingEntity living && living != Minecraft.getInstance().player && !living.isRemoved()) {
-				target = living;
+				return living;
 			}
 		}
+		return null;
+	}
+
+	/**
+	 * 依链寻踪（纯客户端）：点亮下一个脚印，链尾则跳向父实体；目标解析见 {@link #resolveTraceTarget}。
+	 * 同时在本（被点击的）脚印上挂方向指示倒计时：由“脚下这一格”向刚点亮的目标飘粒子指路，
+	 * 而不是让目标自己往自己脸上喷（重复点击仅续期，与高亮同时长）。
+	 * 发射源排他与高亮同规则：全局同时仅一个“被点击脚印”在发射，切换时掐断上一个；
+	 * 点击当场立即放出首颗（不等间隔对齐，消除最多一秒的起手延迟），其后每秒一颗。
+	 */
+	private void traceAndHighlight(ClientLevel level) {
+		Entity target = resolveTraceTarget(level);
 		if (target != null) {
 			ClientHighlights.apply(level, target.getId(), Common.CONFIG.getHighlightTicks());
+			if (Common.CONFIG.isShowDirectionParticles()) {
+				// 排他：上一个发射源不是本次点击时，掐断它的发射（已不在本地副本则随实体消亡，无需处理）
+				if (activeDirectionEmitterId != -1 && activeDirectionEmitterId != this.getId()
+						&& level.getEntity(activeDirectionEmitterId) instanceof FootprintEntity previous) {
+					previous.directionTicks = 0;
+				}
+				activeDirectionEmitterId = this.getId();
+				this.directionTicks = Common.CONFIG.getHighlightTicks();
+				this.spawnDirectionParticle(level, target);
+			}
 		}
+	}
+
+	/**
+	 * 方向指示续发（纯客户端，仅本次点击写入的倒计时内生效）：按倒计时每秒（20 tick 对齐）放出一颗。
+	 * 用倒计时而非实体 tickCount 取模：后者相位随机，点击后的首颗续发可能还要再等近一秒；
+	 * 倒计时从点击那刻起算，周期天然与首颗衔接。
+	 */
+	private void tickDirectionIndicator(ClientLevel level) {
+		if (this.directionTicks <= 0) return;
+		this.directionTicks--;
+		if (this.directionTicks % DIRECTION_PARTICLE_INTERVAL_TICKS != 0) return;
+		Entity target = resolveTraceTarget(level);
+		if (target == null) return;
+		this.spawnDirectionParticle(level, target);
+	}
+
+	/**
+	 * 向目标放出一颗方向指示粒子（END_ROD，末影之眼/末影珍珠同款紫色烟迹）：
+	 * 瞄向目标身体中段而非脚底，仰/俯角时方向感更直观；END_ROD 沿速度方向拉成拖尾长条并自然淡出。
+	 * 选型注：指向性更好的 TRAIL（试炼密室拖线）要 1.20.5+ 才存在，END_ROD 自 1.9 就有，全版本安全；
+	 * PORTAL 则因原版构造器往初速里叠 nextGaussian(σ≈0.4) 噪声 + 持续上浮，方向会被噪声淹没。
+	 * ClientLevel#addParticle 是纯本地调用，不产生任何网络包；粒子走深度测试、不能穿墙，
+	 * 目标被方块全遮时不可见（父实体不受影响，其 glowing 描边本就穿墙）。
+	 */
+	private void spawnDirectionParticle(ClientLevel level, Entity target) {
+		Vec3 delta = target.position().add(0.0, target.getBbHeight() * 0.5, 0.0)
+				.subtract(this.getX(), this.getY() + 0.15, this.getZ());
+		double distance = delta.length();
+		if (distance < 0.5) return; // 目标过近时方向无意义，且会糊在脚印上干扰脉冲辨认
+		Vec3 dir = delta.scale(DIRECTION_PARTICLE_SPEED / distance);
+		level.addParticle(ParticleTypes.END_ROD, this.getX(), this.getY() + 0.15, this.getZ(),
+				dir.x, dir.y, dir.z);
 	}
 
 	// - - - - 存续规则 - - - -
@@ -332,11 +406,13 @@ public class FootprintEntity extends Entity {
 	@Override
 	public void tick() {
 		super.tick();
-		// 高亮倒计时（纯客户端本地，每个玩家只维护自己的）：归零后渲染器自然回到非高亮管线
+		// 高亮倒计时与方向指示倒计时（纯客户端本地，每个玩家只维护自己的）：
+		// 前者归零后渲染器自然回到非高亮管线；后者挂在“被点击”的本脚印上，与是否被点亮无关，故分两条独立递减
 		if (this.level().isClientSide()) {
 			if (this.clientHighlightTicks > 0) {
 				this.clientHighlightTicks--;
 			}
+			this.tickDirectionIndicator((ClientLevel) this.level());
 			return;
 		}
 		// 服务端：过期自毁（每秒一次）——超时即销毁，无需检查方块，省开销
@@ -422,8 +498,19 @@ public class FootprintEntity extends Entity {
 
 	@Override
 	public boolean isPickable() {
-		//【关键】Entity 默认 isPickable() 为 false，不覆写则玩家射线永远选不中脚印，右键交互失效
-		return true;
+		//【关键】准星拾取闸门，按“本地玩家姿态/手部状态”动态判定（纯客户端、每个玩家各自评估、零网络包）：
+		// - 潜行 → false：与原版“潜行穿实体操作后方块”的直觉一致，脚印对射线完全透明；
+		// - 主手持物 → false：可照常挖/放/攻击其后的方块与实体，左键右键都不再被脚印接管
+		//   （实测旧方案潜行穿不透，根因在拾取阶段，故从源头直接不选中，不再依赖 interact 的潜行 PASS）；
+		// - 主手为空 → true：右键点击脚印即依链寻踪（副手是否持物不影响，放宽自“双手皆空”）。
+		// isPickable 仅在客户端准星射线（Minecraft#pick → Level#clip 的 EntitySelector.CAN_BE_PICKED 过滤）中被查询，
+		// 因此返回随本地玩家状态变化的值是安全且语义正确的：谁能选中互不影响。
+		// 服务端没有“本地玩家姿态/手持”这一上下文，保守返回 true 以保留既有实体交互/选中逻辑不受影响。
+		if (!this.level().isClientSide()) return true;
+		Player player = Minecraft.getInstance().player;
+		if (player == null) return true;
+		if (player.isCrouching()) return false;
+		return player.getItemInHand(InteractionHand.MAIN_HAND).isEmpty();
 	}
 
 	@Override
@@ -431,9 +518,8 @@ public class FootprintEntity extends Entity {
 		return true;
 	}
 
-	// 让渲染器在很远处也绘制（脚印是寻踪线索，不应因距离被剔除）
 	@Override
-	public boolean shouldRenderAtSqrDistance(double distance) {
-		return true;
+	public boolean shouldRenderAtSqrDistance(double distSqr) {
+		return distSqr < RENDER_DISTANCE_BLOCKS * RENDER_DISTANCE_BLOCKS; // 64 格之外不渲染
 	}
 }

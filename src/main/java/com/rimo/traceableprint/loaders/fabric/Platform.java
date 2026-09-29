@@ -8,6 +8,8 @@ import com.rimo.traceableprint.VersionUtil;
 import com.rimo.traceableprint.entity.FootprintEntityRenderer;
 import net.fabricmc.api.*;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.renderer.entity.EntityRenderers;
@@ -26,6 +28,9 @@ public class Platform implements ModInitializer {
 		// 注册脚印实体类型到内置注册表（Registries.ENTITY_TYPE 现在是 ResourceKey，实例在 BuiltInRegistries）
 		Registry.register(BuiltInRegistries.ENTITY_TYPE,
 				VersionUtil.getId("footprint"), Common.FOOTPRINT);
+		// 配置上传：注册两个方向的 payload codec（双端都要）；服务端 C2S 接收器在 ServerInit 挂
+		PayloadTypeRegistry.clientboundPlay().register(Common.UploadRequestPayload.TYPE, Common.UploadRequestPayload.CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(Common.UploadConfigPayload.TYPE, Common.UploadConfigPayload.CODEC);
 		Common.LOGGER.info("[TraceablePrint] Footprint entity registered");
 	}
 
@@ -37,6 +42,9 @@ public class Platform implements ModInitializer {
 			// 注册脚印实体渲染器（RenderState 模式）。
 			// 原 EntityRendererRegistry 已弃用，改用通过 Fabric TAW 公开的原版 EntityRenderers.register
 			EntityRenderers.register(Common.FOOTPRINT, FootprintEntityRenderer::new);
+			// 配置上传：绑定 S2C 邀约接收器（仅客户端）
+			ClientPlayNetworking.registerGlobalReceiver(Common.UploadRequestPayload.TYPE,
+					(payload, context) -> Client.handleUploadRequestPayload());
 		}
 	}
 
@@ -45,6 +53,11 @@ public class Platform implements ModInitializer {
 		@Override
 		public void onInitializeServer() {
 			DedicatedServer.init();
+			// 仅专用服务端注册 /traceablefp 命令与 C2S 配置接收器（集成服不走这条初始化路径）
+			CommandRegistrationCallback.EVENT.register(
+					(dispatcher, registryAccess, environment) -> DedicatedServer.registerCommand(dispatcher));
+			ServerPlayNetworking.registerGlobalReceiver(Common.UploadConfigPayload.TYPE,
+					(payload, context) -> DedicatedServer.handleUploadConfigPayload(payload, context.player()));
 		}
 	}
 

@@ -2,7 +2,11 @@ package com.rimo.traceableprint;
 
 import com.rimo.traceableprint.config.Config;
 import com.rimo.traceableprint.entity.FootprintEntity;
+import io.netty.buffer.ByteBuf;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.EntityType;
@@ -24,7 +28,7 @@ public class Common {
 
 	// 脚印实体类型的注册表键（26.1 的 EntityType.Builder.build 需要 ResourceKey）
 	public static final ResourceKey<EntityType<?>> FOOTPRINT_KEY = ResourceKey.create(
-			Registries.ENTITY_TYPE, Identifier.fromNamespaceAndPath(MOD_ID, "footprint"));
+			Registries.ENTITY_TYPE, VersionUtil.getId("footprint"));
 
 	// Define entity type
 	public static final EntityType<FootprintEntity> FOOTPRINT = EntityType.Builder
@@ -36,5 +40,34 @@ public class Common {
 
 	public static void init() {
 		// Platform-specific registration happens in loaders
+	}
+
+	// - - - - - 配置上传：双端共用 payload（纯 vanilla，握手见 DedicatedServer/Client） - - - - -
+
+	/** S2C 空邀约包：服务端校验 op 通过后下发，客户端收到才回传本地配置（防绕过命令直接灌包）。 */
+	public record UploadRequestPayload() implements CustomPacketPayload {
+		public static final Type<UploadRequestPayload> TYPE =
+				new CustomPacketPayload.Type<>(VersionUtil.getId("upload_request"));
+		// 无字段：unit 编解码固定读写同一个单例实例
+		public static final StreamCodec<ByteBuf, UploadRequestPayload> CODEC =
+				StreamCodec.unit(new UploadRequestPayload());
+
+		@Override
+		public Type<? extends CustomPacketPayload> type() {
+			return TYPE;
+		}
+	}
+
+	/** C2S 配置包：客户端把本地 {@link #CONFIG} Gson 序列化成 string 回传服务端。 */
+	public record UploadConfigPayload(String json) implements CustomPacketPayload {
+		public static final Type<UploadConfigPayload> TYPE =
+				new CustomPacketPayload.Type<>(VersionUtil.getId("upload_config"));
+		public static final StreamCodec<ByteBuf, UploadConfigPayload> CODEC =
+				ByteBufCodecs.STRING_UTF8.map(UploadConfigPayload::new, UploadConfigPayload::json);
+
+		@Override
+		public Type<? extends CustomPacketPayload> type() {
+			return TYPE;
+		}
 	}
 }

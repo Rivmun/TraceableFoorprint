@@ -1,6 +1,6 @@
 package com.rimo.traceableprint.mixin.client;
 
-import com.rimo.traceableprint.ClientHighlightHolder;
+import com.rimo.traceableprint.util.ClientHighlightHolder;
 import net.minecraft.world.entity.LivingEntity;
 import org.spongepowered.asm.mixin.Implements;
 import org.spongepowered.asm.mixin.Interface;
@@ -16,6 +16,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 高亮不走服务端 GLOWING 效果（那会广播给所有客户端）：收到定向包时由 ClientHighlights
  * 写入 @Unique 倒计时，本类在 tick 里每帧维护——归零即熄灭，期间未亮则点亮，
  * 若被服务端 shared flags 同步顶掉 glowing 位也会重新断言。
+ * 潜行即消：倒计时内目标进入潜行（isCrouching，客户端读同步 Pose，对其它玩家生效）
+ * 则就地熄灭并撤销倒计时——一次性取消，起身后需重新点击脚印才会再点亮。
  *
  * 【26.1 关键坑】Entity#setGlowingTag 在客户端是无效的：它的实现是
  * hasGlowingTag=值; setSharedFlag(6, isCurrentlyGlowing())，而 isCurrentlyGlowing()
@@ -62,6 +64,10 @@ public abstract class LivingEntityMixin {
 
 		if (--this.traceableprint$clientHighlightTicks == 0) {
 			((EntityAccessor) entity).traceableprint$setSharedFlag(6, false); // 到期熄灭
+		} else if (entity.isCrouching()) {
+			// 潜行取消高亮：熄灭并把倒计时归零（一次性，起身不自动恢复；后续重新点击走 apply 的潜行跳过）
+			this.traceableprint$clientHighlightTicks = 0;
+			((EntityAccessor) entity).traceableprint$setSharedFlag(6, false);
 		} else if (!entity.isCurrentlyGlowing()) {
 			((EntityAccessor) entity).traceableprint$setSharedFlag(6, true); // 未亮/被服务端 flags 同步顶掉：点亮或重新断言
 		}

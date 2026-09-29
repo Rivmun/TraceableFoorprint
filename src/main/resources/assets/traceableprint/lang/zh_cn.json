@@ -24,6 +24,8 @@
   "text.traceableprint.option.printsForInvisible.@Tooltip": "处于隐身（隐身效果或 invisible 标志）的实体是否仍留下脚印。潜行状态无论此项如何都不留脚印。",
   "text.traceableprint.option.highlightTicks": "高亮持续时长",
   "text.traceableprint.option.highlightTicks.@Tooltip": "脚印链被追踪后，穿墙高亮发光的持续时长。",
+  "text.traceableprint.option.directionParticles": "方向指示粒子",
+  "text.traceableprint.option.directionParticles.@Tooltip": "被你点击的脚印会在高亮时长内，每秒朝下一个脚印（追到链尾后为父生物）飘出一颗末影之眼同款的紫色粒子，指引下一目标的方向。纯客户端本地视觉；与其它粒子一样，无法穿透方块看到。",
   "text.traceableprint.option.entityListInverted": "反转生物名单",
   "text.traceableprint.option.entityListInverted.@Tooltip": "关：名单为黑名单，名单内实体不留脚印。开：名单反转为白名单，只为名单内实体留脚印。",
   "text.traceableprint.option.entityList": "生物名单",

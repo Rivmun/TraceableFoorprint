@@ -24,6 +24,8 @@
   "text.traceableprint.option.printsForInvisible.@Tooltip": "Whether entities under invisibility (effect or invisible flag) still leave footprints. Sneaking always suppresses prints regardless of this setting.",
   "text.traceableprint.option.highlightTicks": "Highlight Duration",
   "text.traceableprint.option.highlightTicks.@Tooltip": "How long a footprint chain glows through walls after it is traced.",
+  "text.traceableprint.option.directionParticles": "Direction Particles",
+  "text.traceableprint.option.directionParticles.@Tooltip": "The footprint you click drifts one ender-eye style purple particle per second toward the next footprint (or the parent mob once the trail ends), for as long as the highlight lasts. Client-side only; like all particles it cannot be seen through blocks.",
   "text.traceableprint.option.entityListInverted": "Invert Entity List",
   "text.traceableprint.option.entityListInverted.@Tooltip": "Off: the entity list is a blacklist - listed mobs leave no footprints. On: it becomes a whitelist - only listed mobs leave footprints.",
   "text.traceableprint.option.entityList": "Entity List",
