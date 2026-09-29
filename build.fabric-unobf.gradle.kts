@@ -58,6 +58,10 @@ dependencies {
 
     //modmenu
     implementation("com.terraformersmc:modmenu:${property("deps.modmenu")}")
+    // cloth
+    api("me.shedaniel.cloth:cloth-config-fabric:${property("deps.cloth")}") {
+        exclude(group = "net.fabricmc.fabric-api")
+    }
 }
 
 tasks {

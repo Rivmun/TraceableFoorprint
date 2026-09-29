@@ -1,6 +1,7 @@
 package com.rimo.traceableprint.mixin;
 
 import com.rimo.traceableprint.Common;
+import com.rimo.traceableprint.config.Config;
 import com.rimo.traceableprint.entity.FootprintEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -12,6 +13,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
@@ -53,6 +55,11 @@ public abstract class LivingEntityMixin {
 	// 链尾脚印 UUID：仅服务端权威维护，不走 SynchedEntityData（避免 26.1 与原版 Mob 子类 id 撞号），
 	// 经 addAdditionalSaveData/readAdditionalSaveData 写读 NBT，卸载重载后链不丢。
 	@Unique private String traceableprint$lastFootprint = "";
+
+	// 默认左右/前后偏移幅度（方块）：不再开放给玩家配置，硬编码于此；逐生物覆写表命中时优先用表值，
+	// 二者最终都乘综合缩放倍率（见 spawnFootprint 里的 footprintScale）。
+	@Unique private static final double traceableprint$DEFAULT_SIDE_OFFSET = 0.3;
+	@Unique private static final double traceableprint$DEFAULT_FORWARD_OFFSET = 0.0;
 
 	// 跳跃：离地瞬间额外留一个脚印（不受冷却限制，与 FootprintParticle 参考工程一致）
 	@Inject(method = "jumpFromGround", at = @At("TAIL"))
@@ -115,6 +122,10 @@ public abstract class LivingEntityMixin {
 		if (!(parent.level() instanceof ServerLevel world)) return;
 
 		// 生成闸门：放在唯一入口，移动/跳跃两条触发路径一并生效
+		// 0) 模组总开关：禁用直接返回；仅玩家档下非玩家实体一律不留（其余闸门对玩家档同样生效）
+		Config.WorkMode enableMod = Common.CONFIG.getEnableMod();
+		if (enableMod == Config.WorkMode.DISABLED) return;
+		if (enableMod == Config.WorkMode.PLAYER_ONLY && !(parent instanceof Player)) return;
 		// 1) 潜行（蹲走）一律不留脚印（无开关：潜行本身就是“轻手轻脚”的语义，与配置无关）
 		if (parent.isCrouching()) return;
 		// 2) 隐形实体是否留脚印交给配置（关=隐身者真正无痕；开=隐身≠无迹可寻）
@@ -155,12 +166,17 @@ public abstract class LivingEntityMixin {
 		// 前后偏移：沿前进方向 dir=(-sin,cos) 平移，随机取正负（前/后错落）；两者同时、独立随机，直接烘入实体真实坐标，
 		// 使贴图在实体中居中的同时碰撞箱/交互随之偏移。
 		// 幅度优先取逐生物覆写表（按注册名 namespace:path 精确匹配，不匹配标签）命中条目的 float（取绝对值），
-		// 未命中则回退全局默认；无论读到正负都重新随机符号。
+		// 未命中则回退上面硬编码的默认；无论读到正负都重新随机符号；最终统一乘综合缩放倍率 footprintScale。
+		// 综合缩放倍率（逐生物尺寸表 × 幼体 0.66 × 原版 getScale）：既用于贴图缩放，也用于左右/前后偏移缩放，
+		// 使大生物的脚印不仅贴图更大、左右脚间距与前后错落也一并放大，小生物反之。
 		String mobId = BuiltInRegistries.ENTITY_TYPE.getKey(parent.getType()).toString();
+		float footprintScale = Common.CONFIG.resolveSizeMultiplier(mobId);
+		if (parent.isBaby()) footprintScale *= 0.66F;
+		footprintScale *= parent.getScale();
 		Float customSide = Common.CONFIG.findSideOffset(mobId);
 		Float customForward = Common.CONFIG.findForwardOffset(mobId);
-		double sideMagnitude = customSide != null ? Math.abs(customSide) : Common.CONFIG.getFootprintSideOffset();
-		double forwardMagnitude = customForward != null ? Math.abs(customForward) : Common.CONFIG.getFootprintForwardOffset();
+		double sideMagnitude = (customSide != null ? Math.abs(customSide) : traceableprint$DEFAULT_SIDE_OFFSET) * footprintScale;
+		double forwardMagnitude = (customForward != null ? Math.abs(customForward) : traceableprint$DEFAULT_FORWARD_OFFSET) * footprintScale;
 		double sideSign = parent.getRandom().nextBoolean() ? 1.0 : -1.0;
 		double sideOffset = sideMagnitude * sideSign;
 		double forwardSign = parent.getRandom().nextBoolean() ? 1.0 : -1.0;
@@ -192,12 +208,9 @@ public abstract class LivingEntityMixin {
 		footprint.setPos(spawnX, spawnY, spawnZ);
 		footprint.setYRot(targetYaw);
 		footprint.setXRot(parent.getXRot());
-		// 脚印贴图缩放（对齐参考工程 getEntityScale）：逐生物列表倍率（按注册名匹配）× 幼体 0.66 × 实体自身 getScale()；
-		// 服务端算好后走同步数据下发，客户端仅缩放贴图四边形，不改实体碰撞箱/交互。
-		float texScale = Common.CONFIG.resolveSizeMultiplier(mobId);
-		if (parent.isBaby()) texScale *= 0.66F;
-		texScale *= parent.getScale();
-		footprint.setTexScale(texScale);
+		// 贴图缩放复用上面算好的 footprintScale（与左右/前后偏移同源）：服务端算好后走同步数据下发，
+		// 客户端仅缩放贴图四边形，不改实体碰撞箱/交互。
+		footprint.setTexScale(footprintScale);
 		// 脚印贴图替换：按注册名在 config.textureList 命中则从候选贴图名里随机取一个，服务端选定后走同步数据下发，
 		// 保证同一条脚印在所有玩家眼里是同一张贴图（也同一条链上左右脚/前后脚可以各不相同）。
 		// 未命中就不写（留空串）：客户端按默认 footprint.png 渲染；名字→资源路径的组装与存在性校验都在客户端做。

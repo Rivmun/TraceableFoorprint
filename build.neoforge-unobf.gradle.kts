@@ -59,7 +59,10 @@ dependencies {
     minecraft("com.mojang:minecraft:${property("deps.minecraft")}")
     neoForge("net.neoforged:neoforge:${property("deps.neoforge")}")
 
-    //
+    // cloth
+    api("me.shedaniel.cloth:cloth-config-neoforge:${property("deps.cloth")}") {
+        exclude(group = "net.fabricmc.fabric-api")
+    }
 }
 
 tasks {

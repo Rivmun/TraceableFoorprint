@@ -32,26 +32,26 @@ public class Config {
 	public static final int DEFAULT_SPAWN_INTERVAL_TICKS = 40;         // 移动检测/生成尝试的固定间隔（tick）
 	public static final int DEFAULT_HIGHLIGHT_TICKS = 200;             // 单次点击的高亮时长（tick，10 秒）
 	public static final float DEFAULT_FOOTPRINT_Y_OFFSET = 0.0F;            // 脚印抬高量（避免与地面 z-fight）
-	public static final float DEFAULT_FOOTPRINT_SIDE_OFFSET = 0.3F;      // 脚印相对行进中线的左右偏移幅度（方块），随机正负模拟左右脚、烘焙进实体真实坐标
-	public static final float DEFAULT_FOOTPRINT_FORWARD_OFFSET = 0.0F;   // 脚印沿前进方向的前后偏移幅度（方块），随机正负前后错落、烘焙进实体真实坐标
+	// 注：默认左右/前后偏移幅度不再开放给玩家，已硬编码进 LivingEntityMixin（逐生物覆写表命中时优先用表值，二者最终都乘综合缩放倍率）。
 	public static final float DEFAULT_FOOTPRINT_TEXTURE_SIZE = 0.3125F;  // 脚印贴图默认尺寸（方块，正方形边长），5/16 = 匹配原版像素大小；逐生物缩放表在此基础上再乘
 	public static final float DEFAULT_HARDNESS_GATE = 3.0F;            // 硬度门槛：|defaultDestroyTime| < gate 才可生成
 	public static final boolean DEFAULT_NOTIFY_TRACED = true;          // 被追踪提示开关：服务端在有人追到链尾时给父玩家发 action bar 提示
 	public static final boolean DEFAULT_PRINTS_FOR_INVISIBLE = true;   // 隐形实体（隐身效果 / invisible 标志）是否仍留脚印
 	public static final boolean DEFAULT_ENTITY_LIST_INVERTED = false;  // 生物名单反转：关=名单作黑名单，开=名单作白名单
+	public static final WorkMode DEFAULT_ENABLE_MOD = WorkMode.ALL;       // 模组总开关默认档：所有生物（仍受方块过滤/生物名单约束）
 
 	private long footprintLifetimeTicks = DEFAULT_FOOTPRINT_LIFETIME_TICKS;
 	private double minSpawnDistance = DEFAULT_MIN_SPAWN_DISTANCE;
 	private int spawnIntervalTicks = DEFAULT_SPAWN_INTERVAL_TICKS;
 	private int highlightTicks = DEFAULT_HIGHLIGHT_TICKS;
 	private float footprintYOffset = DEFAULT_FOOTPRINT_Y_OFFSET;
-	private float footprintSideOffset = DEFAULT_FOOTPRINT_SIDE_OFFSET;
-	private float footprintForwardOffset = DEFAULT_FOOTPRINT_FORWARD_OFFSET;
 	private float footprintTextureSize = DEFAULT_FOOTPRINT_TEXTURE_SIZE;
 	private float hardnessGate = DEFAULT_HARDNESS_GATE;
 	private boolean notifyTraced = DEFAULT_NOTIFY_TRACED;
 	private boolean printsForInvisible = DEFAULT_PRINTS_FOR_INVISIBLE;
 	private boolean entityListInverted = DEFAULT_ENTITY_LIST_INVERTED;
+	// 模组总开关（三档）：所有生物 / 仅玩家 / 禁用
+	private WorkMode enableMod = DEFAULT_ENABLE_MOD;
 
 	// 生成白名单（方块ID "namespace:path"，或 "#namespace:tag" 标签）：命中即跳过硬度判定直接放行，优先级最高
 	private Set<String> applyBlocks = new HashSet<>();
@@ -61,7 +61,7 @@ public class Config {
 
 	// - - - 逐生物偏移初始值（复刻参考工程 FootprintParticle）- - -
 	// horseLikeMobs→前后（前进方向）偏移：无 float 的条目取参考中“命中但无幅度”的默认 0.75，已带 float 的保留原值。
-	private static final List<String> DEF_FORWARD_OFFSET_LIKE = Arrays.asList(
+	public static final List<String> DEF_FORWARD_OFFSET_LIKE = Arrays.asList(
 			"minecraft:horse,0.75",
 			"minecraft:donkey,0.75",
 			"minecraft:mule,0.75",
@@ -73,7 +73,7 @@ public class Config {
 			"minecraft:creeper,0.3"
 	);
 	// spiderLikeMobs→左右（垂直前进方向）偏移：无 float 的条目取参考中默认 0.9，已带 float 的保留原值。
-	private static final List<String> DEF_SIDE_OFFSET_LIKE = Arrays.asList(
+	public static final List<String> DEF_SIDE_OFFSET_LIKE = Arrays.asList(
 			"minecraft:spider,0.9",
 			"minecraft:cave_spider,0.9",
 			"minecraft:camel,0.3",
@@ -82,7 +82,7 @@ public class Config {
 			"minecraft:ravager,0.3"
 	);
 	// sizePerMob→脚印贴图缩放倍率（复刻参考工程 DEF_SIZE）：命中条目的 float 连乘，另叠加幼体 0.66 与实体自身 getScale()。
-	private static final List<String> DEF_SIZE_PER_MOB = Arrays.asList(
+	public static final List<String> DEF_SIZE_PER_MOB = Arrays.asList(
 			"minecraft:chicken,0.6",
 			"minecraft:pig,0.8",
 			"minecraft:cat,0.5",
@@ -99,7 +99,7 @@ public class Config {
 	);
 	// blockHeight→脚印在特定方块上生成时的额外 Y 抬升（复刻参考工程 DEF_BLOCKHEIGHT）：雪层/灵魂沙/泥等视觉高度与碰撞箱不符、
 	// 实体踩上去会下沉，脚印需相应抬高以免被非完整方块遮挡。支持 "namespace:path" 与 "#namespace:tag" 两种写法。
-	private static final List<String> DEF_BLOCK_HEIGHT = Arrays.asList(
+	public static final List<String> DEF_BLOCK_HEIGHT = Arrays.asList(
 			"minecraft:snow,0.125",
 			"minecraft:soul_sand,0.125",
 			"minecraft:mud,0.125"
@@ -107,10 +107,11 @@ public class Config {
 	// textureList→格式提示条目（不删、也不当配置读）：本模组的 json 配置没有注释能力，留一条样例让直接改文件的玩家
 	// 一眼看懂格式；它永不命中（mod_id:mob_id 不是任何已注册实体），因此不产生任何效果。
 	// 退一步讲，即使真有模组注册了这个 id，候选名也找不到对应贴图，客户端存在性校验会退回默认贴图，不会崩、也不会粉黑块。
-	private static final List<String> DEF_TEXTURE_LIST = Arrays.asList(
+	public static final List<String> DEF_TEXTURE_LIST = Arrays.asList(
 			"mod_id:mob_id,textureName1,textureName2"
 	);
 
+	// 默认值列表以下列 public 常量形式暴露，供配置界面的“重置”按钮作 setDefaultValue 使用。
 	// 逐生物左右偏移覆写表：条目格式 "modid:mobid,float"（如 "minecraft:zombie,0.3"），命中实体注册名则用该 float 幅度。
 	// 内部存为可编辑的 List<String>（供 ClothConfig 等配置库直接展示/编辑）；只按 namespace:path 精确匹配，不支持标签。
 	private List<String> sideOffsetList = new ArrayList<>(DEF_SIDE_OFFSET_LIKE);
@@ -162,22 +163,6 @@ public class Config {
 		this.footprintYOffset = offset;
 	}
 
-	/** 脚印左右偏移幅度（方块）：相对行进中线垂直方向的偏移量，服务端生成时随机取正负并直接烘焙进实体坐标 */
-	public float getFootprintSideOffset() {
-		return footprintSideOffset;
-	}
-	public void setFootprintSideOffset(float offset) {
-		this.footprintSideOffset = Math.max(0, offset);
-	}
-
-	/** 脚印沿前进方向的前后偏移幅度（方块）：服务端生成时随机取正负（前/后错落）并直接烘入实体坐标 */
-	public float getFootprintForwardOffset() {
-		return footprintForwardOffset;
-	}
-	public void setFootprintForwardOffset(float offset) {
-		this.footprintForwardOffset = Math.max(0, offset);
-	}
-
 	/** 脚印贴图默认尺寸（方块，正方形边长）：默认 5/16 匹配原版像素大小；逐生物缩放表（sizeList）与实体 getScale() 在此基准上再乘 */
 	public float getFootprintTextureSize() {
 		return footprintTextureSize;
@@ -223,6 +208,33 @@ public class Config {
 	}
 	public void setEntityListInverted(boolean entityListInverted) {
 		this.entityListInverted = entityListInverted;
+	}
+
+	/** 模组总开关：见 {@link WorkMode}。{@code DISABLED} 时服务端不生成任何脚印；{@code PLAYER_ONLY} 仅玩家生成。 */
+	public WorkMode getEnableMod() {
+		return enableMod;
+	}
+	public void setEnableMod(WorkMode enableMod) {
+		this.enableMod = enableMod == null ? DEFAULT_ENABLE_MOD : enableMod;
+	}
+
+	/**
+	 * 模组总开关三档：{@code ALL} 所有生物都生成脚印（仍受方块过滤与生物名单约束）、
+	 * {@code PLAYER_ONLY} 仅玩家生成、{@code DISABLED} 完全禁用。
+	 * 只存翻译键、不引 MC 的 Component，以保持 Config 零 loader/MC 依赖；翻译键在配置界面（fabric 侧）转成 Component。
+	 */
+	public enum WorkMode {
+		DISABLED("text.traceableprint.work_mode.disabled"),
+		PLAYER_ONLY("text.traceableprint.work_mode.player_only"),
+		ALL("text.traceableprint.work_mode.all");
+
+		private final String translationKey;
+		WorkMode(String translationKey) {
+			this.translationKey = translationKey;
+		}
+		public String getTranslationKey() {
+			return translationKey;
+		}
 	}
 
 	public void setApplyBlocks(List<String> blocks) {
@@ -422,13 +434,12 @@ public class Config {
 		this.spawnIntervalTicks = src.spawnIntervalTicks;
 		this.highlightTicks = src.highlightTicks;
 		this.footprintYOffset = src.footprintYOffset;
-		this.footprintSideOffset = src.footprintSideOffset;
-		this.footprintForwardOffset = src.footprintForwardOffset;
 		this.footprintTextureSize = src.footprintTextureSize;
 		this.hardnessGate = src.hardnessGate;
 		this.notifyTraced = src.notifyTraced;
 		this.printsForInvisible = src.printsForInvisible;
 		this.entityListInverted = src.entityListInverted;
+		this.enableMod = src.enableMod;
 		this.applyBlocks = src.applyBlocks;
 		this.entityList = src.entityList;
 		this.sideOffsetList = src.sideOffsetList;

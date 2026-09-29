@@ -18,18 +18,21 @@ version_range="~26.1"
 deps.fabric="0.19.2"
 deps.fabric-api="0.146.1+26.1.2"
 deps.modmenu="18.0.0"
+deps.cloth="26.1.154"
 
 ["26.1-neoforge"]
+loom.platform="neoforge"
 deps.minecraft="26.1.2"
 version_range="[26.1,)"
 deps.neoforge="26.1.2.75"
 neoforge_min_version="26.1"
-loom.platform="neoforge"
+deps.cloth="26.1.154"
 
 ["1.20.1-forge"]
+loom.platform="forge"
 deps.minecraft="1.20.1"
 version_range="[1.20,1.20.1]"
 deps.forge="1.20.1-47.1.0"
 forge_min_version="46"
-loom.platform="forge"
 deps.mixinextras="0.5.0"
+deps.cloth="11.1.136"
