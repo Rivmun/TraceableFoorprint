@@ -1,7 +1,10 @@
 package com.rimo.traceableprint;
 
+import com.rimo.traceableprint.config.ConfigScreen;
 //~ if neoforge 'fabric' -> 'neoforge'
 import com.rimo.traceableprint.loaders.fabric.Platform;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 
 public class Client {
 	// 客户端侧节流：上次响应邀约回传配置的时间戳(ms)，防恶意服务端反复邀约
@@ -10,6 +13,24 @@ public class Client {
 
 	public static void init() {
 		//
+	}
+
+	/**
+	 * 供各平台「仅客户端命令」调用的公共动作：在游戏内直接打开配置屏，不经模组列表中转。
+	 *
+	 * <p>Cloth Config 缺席时不加载 {@link ConfigScreen}（其引用只在此检查之后出现，配合 JVM 按需类加载），
+	 * 而是向本地玩家回一条系统提示，措辞与 Fabric/ModMenu、非 Fabric 降级屏复用同一翻译键。
+	 */
+	public static void openConfigScreen() {
+		Minecraft mc = Minecraft.getInstance();
+		if (!Platform.isModLoaded("cloth_config")) {
+			if (mc.player != null) {
+				VersionUtil.sendMessage(mc.player,
+						Component.translatable("text.traceableprint.config.missing_dependency").getString());
+			}
+			return;
+		}
+		mc.setScreen(ConfigScreen.create(mc.screen));
 	}
 
 	/**

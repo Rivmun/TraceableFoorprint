@@ -6,7 +6,6 @@ import com.rimo.traceableprint.config.Config;
 //~ if neoforge 'fabric' -> 'neoforge'
 import com.rimo.traceableprint.loaders.fabric.Platform;
 import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.network.chat.SignableCommand;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permission;
 import net.minecraft.server.permissions.Permissions;

@@ -6,6 +6,8 @@
   "text.traceableprint.title": "Traceable Print Settings",
   "text.traceableprint.seconds": "%s s",
 
+  "text.traceableprint.config.missing_dependency": "Cloth Config is required to open this config screen. Install it and try again.",
+
   "text.traceableprint.category.general": "General",
   "text.traceableprint.category.spawn": "Spawning",
   "text.traceableprint.category.appearance": "Appearance",

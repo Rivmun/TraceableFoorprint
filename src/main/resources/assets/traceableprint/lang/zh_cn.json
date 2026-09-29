@@ -6,6 +6,8 @@
   "text.traceableprint.title": "可寻足迹 配置",
   "text.traceableprint.seconds": "%s 秒",
 
+  "text.traceableprint.config.missing_dependency": "未找到 Cloth Config，请在安装后再尝试打开此配置界面。",
+
   "text.traceableprint.category.general": "通用",
   "text.traceableprint.category.spawn": "生成",
   "text.traceableprint.category.appearance": "外观",
