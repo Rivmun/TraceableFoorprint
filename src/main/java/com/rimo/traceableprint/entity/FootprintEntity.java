@@ -59,6 +59,11 @@ public class FootprintEntity extends Entity {
 	// 脚印贴图缩放倍率（服务端生成时按父生物类型/体型算好并同步）：仅缩放客户端贴图四边形，不改实体碰撞箱。
 	private static final EntityDataAccessor<Float> TEX_SCALE =
 			SynchedEntityData.defineId(FootprintEntity.class, EntityDataSerializers.FLOAT);
+	// 脚印贴图名（服务端生成时按父生物注册名在 config.textureList 命中后随机选定并同步）：
+	// 存字符串而非索引，是为了不要求两端配置一致——客户端拿到名字后自行组装 Identifier 并校验资源包里是否存在，
+	// 取不到就退回默认 footprint.png。空串表示“没有定制贴图”，直接走默认。
+	private static final EntityDataAccessor<String> TEX_NAME =
+			SynchedEntityData.defineId(FootprintEntity.class, EntityDataSerializers.STRING);
 
 	// 高亮倒计时：纯客户端本地状态（谁点击谁知道），由交互直接写入、客户端 tick 递减，驱动渲染器金色脉冲。
 	private int clientHighlightTicks = 0;
@@ -98,6 +103,7 @@ public class FootprintEntity extends Entity {
 		builder.define(IS_TAIL, false);
 		builder.define(GEN_TIME, 0L);
 		builder.define(TEX_SCALE, 1.0F);
+		builder.define(TEX_NAME, "");
 	}
 
 	// 设置脚印贴图缩放倍率（仅服务端生成时写入，随实体同步到客户端）
@@ -108,6 +114,16 @@ public class FootprintEntity extends Entity {
 	// 获取脚印贴图缩放倍率（双端可读）
 	public float getTexScale() {
 		return this.entityData.get(TEX_SCALE);
+	}
+
+	// 设置脚印贴图名（仅服务端生成时写入，随实体同步到客户端）；空串 = 使用默认贴图
+	public void setTextureName(String name) {
+		this.entityData.set(TEX_NAME, name == null ? "" : name);
+	}
+
+	// 获取脚印贴图名（双端可读，客户端渲染器据此检索资源包贴图）
+	public String getTextureName() {
+		return this.entityData.get(TEX_NAME);
 	}
 
 	public void setParentUUID(UUID uuid) {
@@ -211,6 +227,9 @@ public class FootprintEntity extends Entity {
 		}
 		// 恢复贴图缩放：缺失时按 1.0（默认大小）兜底
 		this.setTexScale((float) input.getDoubleOr("TexScale", 1.0D));
+		// 恢复贴图名：缺失时按空串（默认 footprint 贴图）兜底。存档里的名字可能是旧配置留下的，
+		// 如今已从资源包删除也没关系——客户端解析时校验存在性，取不到自然退回默认。
+		this.setTextureName(input.getStringOr("TextureName", ""));
 	}
 
 	@Override
@@ -219,6 +238,10 @@ public class FootprintEntity extends Entity {
 		output.putString("NextUUID", getNextUUID().map(UUID::toString).orElse(""));
 		output.putLong("GenTime", this.getGenTime());
 		output.putDouble("TexScale", this.getTexScale());
+		String textureName = this.getTextureName();
+		if (!textureName.isEmpty()) {
+			output.putString("TextureName", textureName);
+		}
 	}
 
 	// 26.1 的 Entity.interact 是 (Player, InteractionHand, Vec3) 三参数签名

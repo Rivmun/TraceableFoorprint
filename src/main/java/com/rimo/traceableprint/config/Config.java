@@ -104,6 +104,12 @@ public class Config {
 			"minecraft:soul_sand,0.125",
 			"minecraft:mud,0.125"
 	);
+	// textureList→格式提示条目（不删、也不当配置读）：本模组的 json 配置没有注释能力，留一条样例让直接改文件的玩家
+	// 一眼看懂格式；它永不命中（mod_id:mob_id 不是任何已注册实体），因此不产生任何效果。
+	// 退一步讲，即使真有模组注册了这个 id，候选名也找不到对应贴图，客户端存在性校验会退回默认贴图，不会崩、也不会粉黑块。
+	private static final List<String> DEF_TEXTURE_LIST = Arrays.asList(
+			"mod_id:mob_id,textureName1,textureName2"
+	);
 
 	// 逐生物左右偏移覆写表：条目格式 "modid:mobid,float"（如 "minecraft:zombie,0.3"），命中实体注册名则用该 float 幅度。
 	// 内部存为可编辑的 List<String>（供 ClothConfig 等配置库直接展示/编辑）；只按 namespace:path 精确匹配，不支持标签。
@@ -114,6 +120,11 @@ public class Config {
 	private List<String> sizeList = new ArrayList<>(DEF_SIZE_PER_MOB);
 	// 方块额外抬高表：条目格式 "blockid,float" 或 "#tagid,float"，脚印落脚方块命中时对其 Y 叠加 float 抬升。
 	private List<String> blockHeightList = new ArrayList<>(DEF_BLOCK_HEIGHT);
+	// 逐生物脚印贴图覆写表：条目格式 "modid:mobid,textureName1,textureName2,..."——首个逗号前是实体注册名，
+	// 其后是候选贴图名，服务端生成脚印时随机取一个并同步给客户端；命中不到（或列表为空）就用默认 footprint.png。
+	// 贴图名默认相对本模组资源目录（{@code traceableprint:textures/entity/<名字>.png}），也可写完整 "namespace:path"
+	// 让整合包作者把贴图放在自己的命名空间下；名字→Identifier 的组装与资源包存在性校验在客户端 FootprintTextures。
+	private List<String> textureList = new ArrayList<>(DEF_TEXTURE_LIST);
 
 	public long getFootprintLifetimeTicks() {
 		return footprintLifetimeTicks;
@@ -275,6 +286,47 @@ public class Config {
 	}
 
 	/**
+	 * 逐生物脚印贴图覆写表（条目 "modid:mobid,texture1,texture2,..."）：供配置库展示/编辑，getter 返回不可变副本。
+	 *
+	 * <p>【接入配置界面时，本项 tooltip 必须包含以下要点，不能只写“自定义脚印贴图”】
+	 * 候选贴图是「服务端」从它自己那份 textureList 里抽的，抽完把名字同步下来，所以多人游戏下服务端优先：
+	 * 与客户端不一致时，客户端这份列表完全不参与选取（既盖不了服务端选定的图，也补不上服务端没配的生物），
+	 * 客户端唯一保留的话语权是资源存在性——同步来的贴图名在本机资源包里找不到时，退回默认 footprint.png。
+	 * 单人与自己的内嵌服读的是同一个 json，不存在差异（别把上面这句写成“客户端配置无用”以免误导单人玩家）。
+	 * 参考文案（英文同步写给 en_us）：
+	 * 「注意：具体用哪张贴图由服务端的这份配置决定。多人游戏中若服务端配置与本机不同，以服务端为准，
+	 * 本机列表不参与选取（仅当同步来的贴图在本机资源包里找不到时退回默认 footprint.png）。」
+	 */
+	public void setTextureList(List<String> entries) {
+		textureList.clear();
+		textureList.addAll(entries);
+	}
+	public List<String> getTextureList() {
+		return List.copyOf(textureList);
+	}
+
+	/**
+	 * 收集实体注册名（namespace:path）在贴图覆写表中的全部候选贴图名：把每个命中条目首个逗号之后的各段
+	 * （去空白、跳过空段）合并成一个候选池，因此同一生物可以写多行来扩充候选。未命中返回空列表，
+	 * 由调用方回退默认贴图。只按 id 精确匹配，不匹配标签。
+	 * 本方法只在生成侧（服务端）被查一次；客户端拿到名字后不再二查本表（服务端优先的利弊见 getTextureList 说明）。
+	 */
+	public List<String> resolveTextureCandidates(String entityId) {
+		if (entityId == null || textureList.isEmpty()) return List.of();
+		List<String> candidates = new ArrayList<>();
+		for (String entry : textureList) {
+			int comma = entry.indexOf(',');
+			if (comma < 0) continue;
+			if (!entry.substring(0, comma).trim().equals(entityId)) continue;
+			for (String name : entry.substring(comma + 1).split(",")) {
+				String trimmed = name.trim();
+				if (!trimmed.isEmpty()) candidates.add(trimmed);
+			}
+		}
+		return candidates;
+	}
+
+	/**
 	 * 按实体注册名（namespace:path）计算脚印贴图缩放倍率：对齐参考工程 getEntityScale——初始 1，
 	 * 将每个命中条目的 float 连乘（格式非法的 float 跳过），不匹配标签。幼体/实体自身 scale 由调用方另乘。
 	 */
@@ -383,5 +435,6 @@ public class Config {
 		this.forwardOffsetList = src.forwardOffsetList;
 		this.sizeList = src.sizeList;
 		this.blockHeightList = src.blockHeightList;
+		this.textureList = src.textureList;
 	}
 }

@@ -8,6 +8,8 @@ import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.resources.Identifier;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -27,35 +29,43 @@ import java.util.Optional;
  *   故无法让 footprint 进入 glowing 描边 pass，退而用脉冲闪烁。）
  */
 public final class FootprintRenderTypes {
-	/** 高亮用穿墙渲染类型：原色↔纯白脉冲闪烁 + 关闭深度测试，懒注册。 */
-	private static RenderType footprintSeeThrough;
+	/** 高亮用穿墙渲染类型按贴图缓存：脉冲管线的贴图写死在 RenderSetup 里，每张贴图必须有自己的实例。 */
+	private static final Map<Identifier, RenderType> SEE_THROUGH_CACHE = new HashMap<>();
 
+	/** 默认脚印贴图：配置未命中该生物、或指定的贴图在资源包里不存在时使用。 */
 	static final Identifier TEXTURE =
 			Identifier.fromNamespaceAndPath(Common.MOD_ID, "textures/entity/footprint.png");
 	// 自定义着色器（解析到 assets/traceableprint/shaders/core/footprint_pulse.vsh/.fsh）
 	private static final Identifier PULSE_SHADER =
 			Identifier.fromNamespaceAndPath(Common.MOD_ID, "core/footprint_pulse");
 
-	/** 非高亮：应用天光、被方块正常遮挡、且支持顶点 alpha 渐淡的原版实体半透明渲染类型。 */
-	public static RenderType footprint() {
-		return RenderTypes.entityTranslucent(TEXTURE);
+	/**
+	 * 非高亮：应用天光、被方块正常遮挡、且支持顶点 alpha 渐淡的原版实体半透明渲染类型。
+	 * 按贴图取任意 {@code textures/...} 路径即可：{@link RenderTypes#entityTranslucent(Identifier)} 走的是
+	 * 按名字直接绑定纹理对象的通路（不进方块/实体图集），因此整合包新增的贴图无需注册图集；
+	 * 该方法内部按 (贴图, 是否开背面剔除) 做了 memoize，逐帧重复取同一贴图不会重复分配渲染类型。
+	 */
+	public static RenderType footprint(Identifier texture) {
+		return RenderTypes.entityTranslucent(texture);
 	}
 
-	/** 高亮：穿墙原色↔纯白脉冲闪烁，懒注册。 */
-	public static synchronized RenderType footprintSeeThrough() {
-		if (footprintSeeThrough == null) {
-			footprintSeeThrough = RenderType.create("traceableprint:footprint_pulse_see_through", pulseSetup());
-		}
-		return footprintSeeThrough;
+	/**
+	 * 高亮：穿墙原色↔纯白脉冲闪烁，懒注册并按贴图缓存（同一张贴图全游戏只建一次）。
+	 * 每张贴图的管线 location 带上贴图路径以免多个同定义不同贴图的管线撞名。
+	 */
+	public static synchronized RenderType footprintSeeThrough(Identifier texture) {
+		return SEE_THROUGH_CACHE.computeIfAbsent(texture, FootprintRenderTypes::createSeeThrough);
 	}
 
 	/**
 	 * 复制 TEXT_SEE_THROUGH 的 uniform/顶点格式/混合/多边形状态，替换成自定义脉冲着色器，并关闭深度测试（穿墙）。
+	 * 经 accesswidener 开放的包私有静态工厂 {@code RenderType.create} 建立（见 traceableprint(.unobf).accesswidener）。
 	 */
-	private static RenderSetup pulseSetup() {
+	private static RenderType createSeeThrough(Identifier texture) {
 		RenderPipeline base = RenderPipelines.TEXT_SEE_THROUGH;
 		var builder = RenderPipeline.builder()
-				.withLocation(Identifier.fromNamespaceAndPath(Common.MOD_ID, "pipeline/footprint_pulse_see_through"))
+				.withLocation(Identifier.fromNamespaceAndPath(Common.MOD_ID,
+						"pipeline/footprint_pulse_see_through/" + texture.getPath()))
 				.withVertexShader(PULSE_SHADER)
 				.withFragmentShader(PULSE_SHADER)
 				.withSampler("Sampler0")
@@ -75,9 +85,10 @@ public final class FootprintRenderTypes {
 			builder.withPolygonMode(base.getPolygonMode());
 		}
 		builder.withDepthStencilState(Optional.empty()); // 关闭深度测试 → 穿墙
-		return RenderSetup.builder(builder.build())
-				.withTexture("Sampler0", TEXTURE)
+		RenderSetup setup = RenderSetup.builder(builder.build())
+				.withTexture("Sampler0", texture)
 				.createRenderSetup();
+		return RenderType.create("traceableprint:footprint_pulse_see_through/" + texture.getPath(), setup);
 	}
 
 	private FootprintRenderTypes() {

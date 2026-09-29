@@ -198,6 +198,13 @@ public abstract class LivingEntityMixin {
 		if (parent.isBaby()) texScale *= 0.66F;
 		texScale *= parent.getScale();
 		footprint.setTexScale(texScale);
+		// 脚印贴图替换：按注册名在 config.textureList 命中则从候选贴图名里随机取一个，服务端选定后走同步数据下发，
+		// 保证同一条脚印在所有玩家眼里是同一张贴图（也同一条链上左右脚/前后脚可以各不相同）。
+		// 未命中就不写（留空串）：客户端按默认 footprint.png 渲染；名字→资源路径的组装与存在性校验都在客户端做。
+		List<String> textureCandidates = Common.CONFIG.resolveTextureCandidates(mobId);
+		if (!textureCandidates.isEmpty()) {
+			footprint.setTextureName(textureCandidates.get(parent.getRandom().nextInt(textureCandidates.size())));
+		}
 		// 新脚印即当前链尾
 		footprint.setChainTail(true);
 

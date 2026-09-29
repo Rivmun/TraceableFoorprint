@@ -14,6 +14,7 @@ import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.ARGB;
 import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.util.Mth;
@@ -26,6 +27,8 @@ import net.minecraft.world.phys.Vec3;
  * 对“贴图薄片”类实体，直接提交几何才是原版常规做法。
  * 碰撞箱(EntityType.sized)与贴图解耦；贴图沿实体 yaw 旋转、随存续时间从 0.02 下沉到 0.01。
  * 左右脚偏移已烘入实体真实坐标（见 LivingEntityMixin），贴图始终在实体原点居中。
+ * 贴图本身可按生物替换：服务端生成时按 config.textureList 命中生物并随机选定一个贴图名同步下来，
+ *   客户端逐帧经 FootprintTextures 解析成实际路径（见 state.texture），未定制/资源包缺图则用默认 footprint.png。
  *
  * 高亮：走自定义脉冲管线（见 FootprintRenderTypes，core/footprint_pulse 在 footprint 原色与纯白间随时间闪烁，
  *   关深度穿墙、不采样光照）。非高亮：走公共 RenderTypes.entityTranslucent，采样世界 lightmap
@@ -75,6 +78,9 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		super.extractRenderState(entity, state, tickDelta);
 		state.yawDeg = entity.getYRot();
 		state.texScale = entity.getTexScale();
+		// 脚印贴图：把服务端同步下来的贴图名解析成可用路径（未定制/资源包里没这个文件 → 默认 footprint.png）。
+		// 两条渲染管线（天光半透明 / 高亮脉冲）都用这一个值，保证高亮前后贴图一致、不会一亮就跳回默认图。
+		state.texture = FootprintTextures.resolve(entity.getTextureName());
 		state.highlighted = entity.isHighlighted();
 		// 全局同步的脉冲相位：用世界游戏时间（+插值）而非实体年龄，让所有高亮脚印同步闪烁
 		state.gameTime = entity.level().getGameTime() + tickDelta;
@@ -138,10 +144,10 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		if (state.highlighted) {
 			float pulse = (float) ((Math.sin(state.gameTime * 0.15) + 1.0) * 0.5); // 0..1 往复
 			int vertexAlpha = (int) (pulse * 255.0F);
-			drawFootprintQuad(poseStack, submitNodeCollector, FootprintRenderTypes.footprintSeeThrough(), light, vertexAlpha, half);
+			drawFootprintQuad(poseStack, submitNodeCollector, FootprintRenderTypes.footprintSeeThrough(state.texture), light, vertexAlpha, half);
 		} else {
 			int fadeAlpha = (int) (state.fadeAlpha * 255.0F);
-			drawFootprintQuad(poseStack, submitNodeCollector, FootprintRenderTypes.footprint(), light, fadeAlpha, half);
+			drawFootprintQuad(poseStack, submitNodeCollector, FootprintRenderTypes.footprint(state.texture), light, fadeAlpha, half);
 		}
 
 		poseStack.popPose();
@@ -214,6 +220,7 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		public float yawDeg;
 		public float texScale;
 		public float renderY;
+		public Identifier texture = FootprintRenderTypes.TEXTURE;
 		public boolean highlighted;
 		public double gameTime;
 		public float fadeAlpha;
