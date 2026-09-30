@@ -72,28 +72,50 @@ public abstract class LivingEntityMixin {
 		// 脚印只在服务端生成
 		if (entity.level().isClientSide()) return;
 
-		if (this.traceableprint$footprintCooldown > 0) {
-			this.traceableprint$footprintCooldown--;
-			return;
-		}
 		double cx = entity.getX();
 		double cz = entity.getZ();
-		// 用两次检测间隔内的真实位移平方判断移动（阈值 0.01≈0.1 格）：
+		boolean onGround = entity.onGround();
+		// 自上次刷新以来的真实位移平方判断移动（阈值 0.01≈0.1 格）：
 		// “是否真的在走”只认位移，不认速度——顶墙/撞船壁时速度仍非零但根本没位移
 		double dx = this.traceableprint$lastCheckInit ? cx - this.traceableprint$lastCheckX : 0.0;
 		double dz = this.traceableprint$lastCheckInit ? cz - this.traceableprint$lastCheckZ : 0.0;
 		boolean moving = (dx * dx + dz * dz) > 1.0E-2;
-		// 触发条件（参照 FootprintParticle）：A. 贴地且有水平移动；B. 落地瞬间
-		boolean justLanded = !this.traceableprint$wasOnGround && entity.onGround();
-		if ((moving && entity.onGround()) || justLanded) {
-			// 位移一并传入：速度近零（骑船、被推挤、落地瞬间已减速）时作为方向兜底
+		// 落地边沿（上一 tick 离地、本 tick 贴地）每 tick 检测、且不受冷却节流影响：
+		// 无论主动跳跃、从高处跌落还是被击飞后落地，只要发生“离地→贴地”即生成（此路径无视冷却，仅受最小间距闸门约束）。
+		boolean justLanded = !this.traceableprint$wasOnGround && onGround;
+		this.traceableprint$wasOnGround = onGround;
+		if (justLanded) {
+			traceableprint$spawnFootprint(entity, new Vec3(dx, 0.0, dz));
+			// 落地生成后重置冷却，让紧随其后的“移动周期生成”暂停一个窗口，避免落地印与移动印瞬时叠加
+			this.traceableprint$footprintCooldown = traceableprint$spawnInterval(entity);
+			this.traceableprint$lastCheckX = cx;
+			this.traceableprint$lastCheckZ = cz;
+			this.traceableprint$lastCheckInit = true;
+			return;
+		}
+		// 移动周期生成：仍受冷却节流（节流窗口在冲刺时缩短至三分之二）。冷却未过只递减、不动位移基准。
+		if (this.traceableprint$footprintCooldown > 0) {
+			this.traceableprint$footprintCooldown--;
+			return;
+		}
+		if (moving && onGround) {
+			// 位移一并传入：速度近零（骑船、被推挤）时作为方向兜底
 			traceableprint$spawnFootprint(entity, new Vec3(dx, 0.0, dz));
 		}
 		this.traceableprint$lastCheckX = cx;
 		this.traceableprint$lastCheckZ = cz;
 		this.traceableprint$lastCheckInit = true;
-		this.traceableprint$wasOnGround = entity.onGround();
-		this.traceableprint$footprintCooldown = Common.CONFIG.getSpawnIntervalTicks();
+		this.traceableprint$footprintCooldown = traceableprint$spawnInterval(entity);
+	}
+
+	/**
+	 * 当前生效的移动生成间隔（tick）：基础值来自 spawnIntervalTicks，冲刺时缩短至三分之二（下限 1 tick）。
+	 */
+	@Unique
+	private static int traceableprint$spawnInterval(LivingEntity entity) {
+		int base = Common.CONFIG.getSpawnIntervalTicks();
+		if (entity.isSprinting()) return Math.max(1, Math.round(base * 2.0F / 3.0F));
+		return base;
 	}
 
 	// 持久化链尾 UUID：写入生物 NBT，卸载重载/服务端重启后链头不丢（值取自服务端 @Unique 字段）
@@ -192,7 +214,9 @@ public abstract class LivingEntityMixin {
 		UUID lastId = traceableprint$parseUuid(this.traceableprint$lastFootprint);
 
 		// 最小间距：与上一个脚印（若仍在世界）过近则跳过，防原地跳跃/慢蹭刷屏（上一脚印卸载/取不到则放行）
+		// 冲刺时闸门同样缩短至三分之二，让高速下更密集的落点（含更近的落地）也能留印
 		double minDist = Common.CONFIG.getMinSpawnDistance();
+		if (parent.isSprinting()) minDist *= 2.0 / 3.0;
 		if (minDist > 0 && lastId != null && world.getEntity(lastId) instanceof FootprintEntity prevFp) {
 			double ddx = prevFp.getX() - spawnX;
 			double ddz = prevFp.getZ() - spawnZ;

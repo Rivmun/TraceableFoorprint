@@ -4,8 +4,9 @@ Initial release.
 
 ## Footprint generation
 
-- Living entities (mobs and players) leave footprint **entities** on the ground while walking and at the moment of landing from a jump; generation runs server-side and is fully synced/persisted with the world.
-- Rate limiting: fixed spawn interval plus a minimum-distance gate against the previous footprint, so hopping in place or slow creeping never floods the ground.
+- Living entities (mobs and players) leave footprint **entities** on the ground while walking and at the moment of landing — from an active jump, a fall off a ledge, or knockback; generation runs server-side and is fully synced/persisted with the world.
+- Rate limiting: walking prints use a fixed spawn interval plus a minimum-distance gate against the previous footprint, so slow creeping never floods the ground. Landing is detected every tick and bypasses the interval (still gated by minimum distance), so holding jump to bunny-hop no longer drops landings.
+- Sprinting shortens both the spawn interval and the minimum-distance gate to two-thirds, keeping the trail dense at speed.
 - Sneaking entities never leave footprints; whether invisible entities (Invisibility effect / invisible flag) still print is configurable.
 - Block filtering: prints spawn on soft blocks (mining-hardness gate) by default; any block ID or `#block tag` can be whitelisted to bypass the gate.
 - Prints spawn behind the walker, oriented to the actual movement direction, with randomized left/right foot and forward/back stagger; positions are baked into the entity so hitbox and interaction follow the visual offset.
@@ -18,7 +19,7 @@ Initial release.
 - Each footprint links to its parent entity and the next footprint in the chain; chain pointers are persisted in entity NBT, so trails survive chunk unload/reload and server restarts.
 - Right-click a footprint to follow the trail; reaching the true chain tail highlights the parent entity itself. Broken links (expired/destroyed mid-chain) are silently ignored — only a verified tail leads to the parent.
 - Highlighting is 100% client-side local state (no network packets, other players unaffected), with an exclusive single-target rule: only one footprint/entity is highlighted at a time per player, re-clicking the same target just refreshes the duration.
-- Highlighted footprints render with a pulsing golden shader effect; highlighted living entities get a see-through-blocks glowing outline maintained every tick (asserted via direct shared-flag write, with server-side flag overrides re-asserted).
+- Highlighted footprints render with a pulsing golden shader effect; highlighted living entities get a see-through-blocks glowing outline that persists for as long as the highlight is active.
 - A highlighted entity that starts sneaking loses its highlight.
 - Footprints are targetable only with an empty main hand while not sneaking; holding any item (or sneaking) makes them fully transparent to the crosshair, so they never block mining/placing/attacking the block under them. A vanilla-style selection outline is drawn on a footprint only while it is actually clickable.
 - Direction indicator: the footprint you clicked emits one slow END_ROD particle per second drifting toward the current trace target (next footprint / parent entity), immediately on click with no startup delay; only one emitter is active at a time, in sync with the exclusive highlight rule. Purely client-side, toggleable.
@@ -45,6 +46,8 @@ Initial release.
 
 - In-game config screen (Cloth Config, via Mod Menu on Fabric / mod config button), covering lifetime, spawn interval, minimum distance, highlight duration, direction particles, invisible-entity behavior, hardness gate, block/entity lists and all per-mob tables; every option has reset-to-default.
 - Plain JSON config at `config/traceableprint.json`, loaded at startup and auto-saved; unknown/missing keys fall back to defaults for forward compatibility.
-- Dedicated-server command support (op level 2): `/traceableprint setEnable off|player|all` to switch the work mode headlessly, and `/traceableprint upload` to pull the executing player's client config onto the server through a solicited, token-guarded (TTL, one-shot, size-capped, cooldown) round trip.
-- Multi-loader, multi-version build via Stonecutter: Fabric and NeoForge for 26.1, Forge for 1.20.1; all footprint interaction/highlight logic is loader-agnostic and client-contained.
+- Dedicated-server commands (op level 2): `/traceableprint setEnable off|player|all` to switch the work mode without opening the config screen, and `/traceableprint upload` to pull the executing player's client config onto the server.
+- Available for Fabric and NeoForge on MC 26.1, 26.2 and 26.3, and for Forge on 1.20.1.
+- Open the config screen from anywhere in-game with the client command `/traceableprintconfig` — no Mod Menu required, so it also works on NeoForge and in singleplayer.
+- If the config library isn't installed, opening the config shows a clear in-game notice screen explaining what's missing instead of erroring out.
 - English and Simplified Chinese localizations.

@@ -2,7 +2,7 @@
 
 A multi-platform Minecraft mod that adds **interactable footprint entities**: living entities leave traceable footprints on the ground as they walk, and other players can right-click a footprint to follow the trail step by step until it leads to the creature (or player) that made it.
 
-- This mod is a ground-up rework of the author's earlier particle-based mod [FootprintParticle](https://github.com/Rivmun/FootprintParticle).
+- This mod is a ground-up rework of the author's earlier particle-based mod [FootprintParticle](https://github.com/Rivmun/FootprintParticle) ⬅️Check it if you want a pure particle, visual, client-only footprint.
 
 - This mod is made by **vibe coding**, then reviewed / tested by human.
 
@@ -10,8 +10,9 @@ A multi-platform Minecraft mod that adds **interactable footprint entities**: li
 
 ### Footprint generation
 
-- Entities leave footprints while **walking on the ground** and at the **moment of landing** from a jump. Both triggers run on the server side; footprints are real entities that are synced and saved with the world.
-- To keep trails readable and cheap, generation is rate-limited: footprints are only attempted at a fixed interval, and a new footprint is skipped if it spawns **too close to the previous one** — so hopping in place or creeping around never floods the ground.
+- Entities leave footprints while **walking on the ground** and at the **moment of landing** — whether from an active jump, tumbling off a ledge, or being knocked back. Both triggers run on the server side; footprints are real entities that are synced and saved with the world.
+- To keep walking trails readable and cheap, periodic ground prints are rate-limited: they are only attempted at a fixed interval, and a new footprint is skipped if it spawns **too close to the previous one** — so creeping in place never floods the ground. Landing, by contrast, is detected every tick and ignores that interval, so holding jump while bunny-hopping still leaves a print on every landing (still subject to the minimum-distance gate).
+- While **sprinting**, both the spawn interval and the minimum-distance gate shrink to two-thirds, so the trail keeps up with the faster pace instead of thinning out.
 - Sneaking entities never leave footprints. Invisible entities (Invisibility potion / invisible flag) can be configured either way.
 - Footprints only form on blocks you would plausibly sink a print into: soft ground (low mining hardness) qualifies by default, and any block or block tag can be whitelisted to force-enable prints regardless of hardness.
 - Each footprint remembers its **parent entity** and the **next footprint in its chain**, forming one linked trail per creature. The chain pointer is persisted in the entity's NBT, so trails survive unloads, reloads and server restarts.
@@ -66,7 +67,9 @@ Names are case-insensitive and whitespace-tolerant; typos are logged once and re
 
 ## Configuration
 
-Everything is exposed in an in-game config screen (via Cloth Config) and stored as plain JSON at `config/traceableprint.json`.
+Everything is tweaked in an easy in-game config screen and saved as plain JSON at `config/traceableprint.json`.
+
+Open the config screen from the mod list (Mod Menu on Fabric, the mod's **Config** button on NeoForge), or from anywhere in-game by typing **`/traceableprintconfig`** in chat — that command works on every platform, including singleplayer. If the config library the screen is built on (Cloth Config) isn't installed, the mod shows a friendly screen telling you so instead of erroring out.
 
 On **dedicated servers**, two commands are available (op level 2 required):
 

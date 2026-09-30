@@ -16,7 +16,6 @@ import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.ARGB;
-import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
@@ -32,8 +31,9 @@ import org.joml.Matrix4f;
  *   客户端逐帧经 FootprintTextures 解析成实际路径（见 state.texture），未定制/资源包缺图则用默认 footprint.png。
  *
  * 高亮：走自定义脉冲管线（见 FootprintRenderTypes，core/footprint_pulse 在 footprint 原色与纯白间随时间闪烁，
- *   关深度穿墙、不采样光照）。非高亮：走公共 RenderTypes.entityTranslucent，采样世界 lightmap
- *   实现天光昼夜变暗；顶点 UV2 把方块光锁 0 只留天光（规避火把暖光/红色 overlay 行导致的偏红）。
+ *   关深度穿墙、不采样光照）。非高亮：走公共 RenderTypes.entityTranslucent，采样世界 lightmap，
+ *   顶点 UV2 取实体处完整光照（天光昼夜变暗 + 方块光/火把等环境光暖照）。历史上“发红”的元凶是
+ *   UV1(overlay) 默认落到的红色 overlay 行，已由 setOverlay(NO_OVERLAY) 独立规避；方块光本身只添火把暖调，故重新启用。
  *   非高亮选 translucent 而非 cutout：仅启用 alpha 混合才能把顶点 alpha 当不透明度用，实现存活末段渐淡。
  *
  * 瞄准判定框：准星指在本脚印上时，用与原版“选中方块”同一套线框样式（RenderTypes.lines() /
@@ -138,10 +138,11 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 
 		// 单个四边形：非高亮走原版实体半透明管线（采样 lightmap、应用天光、被方块遮挡、支持 alpha 混合）；
 		// 高亮走自定义脉冲管线（关深度穿墙、原色↔纯白闪烁、不受光照）。
-		// 光照：非高亮保留实体当前天光，把方块光通道锁 0（LightCoordsUtil.withBlock(...,0)）→ 白天亮、夜里暗、不偏红。
+		// 光照：非高亮取实体处完整光照坐标（天光 + 方块光/火把环境光）→ 白天亮、夜里暗、火把旁被暖照。
+		// （“发红”元凶是 overlay 红色行，另由 NO_OVERLAY 规避，与此处方块光无关，故可安全恢复环境光。）
 		// 顶点 alpha：非高亮=淡出系数×255（entityTranslucent 启用 SRC_ALPHA 混合，顶点 alpha 作为不透明度与背景叠加，
 		// 实现“越接近自动销毁越透明”；cutout 无混合、此值无效，故必须走 translucent）；高亮=脉冲值（由 fsh 当插值因子）。
-		int light = LightCoordsUtil.withBlock(state.lightCoords, 0);
+		int light = state.lightCoords;
 		// 基准半尺寸：配置的正方形边长之半（默认 5/16 的一半）；texScale 已由位堆栈缩放乘上
 		float half = Common.CONFIG.getFootprintTextureSize() * 0.5F;
 		if (state.highlighted) {
@@ -194,7 +195,7 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 	/**
 	 * 提交一张脚印四边形。
 	 * 非高亮的 entityTranslucent 顶点格式含 UV1(overlay)/UV2(light)/Normal，必须显式给出：
-	 * - setLight(light)：UV2 = 仅天光（block 锁 0），供 lightmap 采样得到昼夜亮度；
+	 * - setLight(light)：UV2 = 实体处完整光照（天光 + 方块光），供 lightmap 采样得到昼夜与火把亮度；
 	 * - setOverlay(OverlayTexture.NO_OVERLAY)：走透明 overlay 行，避免 (0,0) 红色行导致偏红（历史坑）；
 	 * - setNormal(0,1,0)：地面向上法线，供实体方向光计算。
 	 * 高亮的脉冲管线格式(POSITION_COLOR_TEX_LIGHTMAP)不含 UV1/Normal，对应 setter 会被安全忽略；

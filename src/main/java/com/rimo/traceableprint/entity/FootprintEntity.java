@@ -86,10 +86,12 @@ public class FootprintEntity extends Entity {
 	private long traceNotifyReadyTime = 0L;
 
 	// - - - 方向指示粒子（纯客户端视觉，由被点击的脚印发射） - - -
-	// 喷发间隔（tick）：点击即时放出首颗，其后每秒一颗，持续整个高亮时长
-	private static final int DIRECTION_PARTICLE_INTERVAL_TICKS = 20;
-	// 缓慢飘飞初速（方块/tick）：END_ROD 沿传入速度拖成长条飞行、自带淡出，低量级慢飘而指路
-	private static final double DIRECTION_PARTICLE_SPEED = 0.08;
+	// 喷发间隔（tick）：点击即时放出首颗，其后每秒四颗（每 5 tick 一颗），持续整个高亮时长
+	private static final int DIRECTION_PARTICLE_INTERVAL_TICKS = 5;
+	// 起点扇形半角（度）：26.3 的 PORTAL “起点 = 终点 + 传入的速度参数”，故把该偏移方向绕竖直轴在目标方向左右各 30° 内随机
+	private static final double DIRECTION_PARTICLE_CONE_DEGREES = 30.0;
+	// 起点扇形半径（方块）：终点已落在长 1 方块的方向线上，起点再沿扇形方向外推至多 1 方块
+	private static final double DIRECTION_PARTICLE_SPRAY = 1.0;
 	// 当前发射源脚印 id（仅客户端有意义，对齐 ClientHighlights.highlightedId 的排他模式：
 	// 存 id 不存引用，发射源移出本地副本/被移除时引用随实体自然消亡，静态字段零泄漏）
 	private static int activeDirectionEmitterId = -1;
@@ -384,21 +386,35 @@ public class FootprintEntity extends Entity {
 	}
 
 	/**
-	 * 向目标放出一颗方向指示粒子（END_ROD，末影之眼/末影珍珠同款紫色烟迹）：
-	 * 瞄向目标身体中段而非脚底，仰/俯角时方向感更直观；END_ROD 沿速度方向拉成拖尾长条并自然淡出。
-	 * 选型注：指向性更好的 TRAIL（试炼密室拖线）要 1.20.5+ 才存在，END_ROD 自 1.9 就有，全版本安全；
-	 * PORTAL 则因原版构造器往初速里叠 nextGaussian(σ≈0.4) 噪声 + 持续上浮，方向会被噪声淹没。
+	 * 向目标方向发射一颗传送门粒子（PORTAL，紫色漩涡）。
+	 * 26.3 的 PortalParticle 是“确定曲线滑移”模型：传入坐标 (px,py,pz) 是粒子消散处的**终点**，
+	 * 传入的 (vx,vy,vz) 不是速度而是“起点−终点”的偏移，且原版在 Y 上硬编码 +1 方块（粒子生来从终点上方 1 格坠落归位）。
+	 * 据此布局指向：终点随机落在“从被点击脚印出发、指向目标、长 1 方块”的线上；起点偏移方向把 dir 绕竖直轴在左右 ±30° 内随机偏转，
+	 * 于是粒子从朝向目标的扇形飞出、汇聚回线上终点，用整排分布而非单颗轨迹表达指向。
+	 * 目标取身体中段（+半身高），仰/俯角时方向更直观；过近（<0.5）时方向无意义且会糊在脚印上，跳过。
 	 * ClientLevel#addParticle 是纯本地调用，不产生任何网络包；粒子走深度测试、不能穿墙，
 	 * 目标被方块全遮时不可见（父实体不受影响，其 glowing 描边本就穿墙）。
 	 */
 	private void spawnDirectionParticle(ClientLevel level, Entity target) {
-		Vec3 delta = target.position().add(0.0, target.getBbHeight() * 0.5, 0.0)
-				.subtract(this.getX(), this.getY() + 0.15, this.getZ());
+		double ox = this.getX();
+		double oy = this.getY() + 0.15;
+		double oz = this.getZ();
+		Vec3 delta = target.position().add(0.0, target.getBbHeight() * 0.5, 0.0).subtract(ox, oy, oz);
 		double distance = delta.length();
 		if (distance < 0.5) return; // 目标过近时方向无意义，且会糊在脚印上干扰脉冲辨认
-		Vec3 dir = delta.scale(DIRECTION_PARTICLE_SPEED / distance);
-		level.addParticle(ParticleTypes.END_ROD, this.getX(), this.getY() + 0.15, this.getZ(),
-				dir.x, dir.y, dir.z);
+		Vec3 dir = delta.scale(1.0 / distance); // 指向目标的单位向量
+		double t = this.getRandom().nextDouble(); // 终点：沿“单位长方向线”随机取点（PORTAL 收敛消失处）
+		// 起点偏移：把 dir 绕竖直轴在左右 ±30° 内随机偏转（保单位长、保俯仰），再沿该方向外推至多 1 方块
+		double angle = Math.toRadians((this.getRandom().nextDouble() * 2.0 - 1.0) * DIRECTION_PARTICLE_CONE_DEGREES);
+		double cos = Math.cos(angle);
+		double sin = Math.sin(angle);
+		double sx = dir.x * cos + dir.z * sin;
+		double sz = -dir.x * sin + dir.z * cos;
+		double len = this.getRandom().nextDouble() * DIRECTION_PARTICLE_SPRAY;
+		// 传参语义：(px,py,pz)=终点，(vx,vy,vz)=起点相对终点的偏移
+		level.addParticle(ParticleTypes.PORTAL,
+				ox + dir.x * t, oy + dir.y * t, oz + dir.z * t,
+				sx * len, dir.y * len, sz * len);
 	}
 
 	// - - - - 存续规则 - - - -
