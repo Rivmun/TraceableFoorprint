@@ -23,14 +23,19 @@ public class Client {
 	 */
 	public static void openConfigScreen() {
 		Minecraft mc = Minecraft.getInstance();
-		if (!Platform.isModLoaded("cloth_config")) {
+		//~ if !fabric 'cloth-config2' -> 'cloth_config'
+		if (!Platform.isModLoaded("cloth-config2")) {
 			if (mc.player != null) {
 				VersionUtil.sendMessage(mc.player,
 						Component.translatable("text.traceableprint.config.missing_dependency").getString());
 			}
 			return;
 		}
-		mc.setScreen(ConfigScreen.create(mc.screen));
+		//? if >=26.2 {
+		mc.gui.setScreen(ConfigScreen.create(mc.gui.screen()));
+		//? } else {
+		/*mc.setScreen(ConfigScreen.create(mc.screen));
+		*///? }
 	}
 
 	/**

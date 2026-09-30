@@ -21,6 +21,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4f;
 
 /**
  * 26.1 实体渲染器（RenderState 模式），采用与画（Painting）相同的直接四边形提交方式：
@@ -128,7 +129,7 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		// 推导：绕 Y 转 θ 把局部 -Z 映到 (-sinθ, -cosθ)，而实体前进方向是 (-sin(yaw), cos(yaw))，
 		// 只有 θ = 180 - yaw 两者才相等（直接用 yaw 会把 Z 分量镜像：贴图朝向与行进方向反）。
 		// 对应关系：局部 -Z = 前进方向（贴图 v=0 那一侧）。
-		poseStack.mulPose(Axis.YP.rotationDegrees(180.0F - state.yawDeg));
+		poseStack.mulPose(new Matrix4f().rotation(Axis.YP.rotationDegrees(180.0F - state.yawDeg)));
 		// 贴图沿实体 yaw 旋转后在局部 X 上关于原点对称（居中）：左右脚偏移已烘入实体坐标，此处不再平移。
 		// 缩放仅作用于贴图四边形的局部 X/Z（水平面），抬高量 renderY 已在之前提交到矩阵、不受影响；实体碰撞箱/判定框不变。
 		if (state.texScale > 0.0F) {

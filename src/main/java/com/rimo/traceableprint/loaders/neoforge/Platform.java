@@ -26,7 +26,6 @@ import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.client.network.ClientPacketDistributor;
-import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.registries.RegisterEvent;
 
@@ -39,7 +38,7 @@ public class Platform {
 	public static void init(FMLCommonSetupEvent event) {
 		Common.init();
 	}
-	
+
 	@SubscribeEvent
 	public static void onRegister(RegisterEvent event) {
 		if (event.getRegistryKey().equals(Registries.ENTITY_TYPE)) {
@@ -65,17 +64,15 @@ public class Platform {
 									? ConfigScreen.create(parentScreen)
 									: new MissingDependencyScreen(parentScreen))
 			);
-
-			// 客户端命令在 NeoForge 游戏总线注册（RegisterClientCommandsEvent 属游戏总线事件，与本类的
-			// MOD 总线订阅不同源），故在客户端初始化阶段显式挂到 NeoForge.EVENT_BUS，避免挂错总线不触发。
-			NeoForge.EVENT_BUS.addListener(ClientInit::onRegisterClientCommands);
 		}
 
 		/^*
 		 * 注册仅客户端命令 {@code /traceableprintconfig}：在游戏内直接打开配置屏，不经模组列表中转。
 		 * 名字刻意不含空格——Fabric 上带空格的命令会因命令前缀与服务端专用命令冲突而被覆盖。
+		 * 本类带 {@code @EventBusSubscriber(value = Dist.CLIENT)}，NeoForge 按事件类型自动路由到客户端游戏总线，无需手动 addListener。
 		 ^/
-		public static void onRegisterClientCommands(RegisterClientCommandsEvent event) {
+		@SubscribeEvent
+		public static void registerClientCommands(RegisterClientCommandsEvent event) {
 			event.getDispatcher().register(Commands.literal("traceableprintconfig")
 					.executes(ctx -> {
 						Client.openConfigScreen();

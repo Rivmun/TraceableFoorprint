@@ -1,13 +1,25 @@
+//? if < 26.3 {
+//#version 330
+//#
+//#moj_import <minecraft:dynamictransforms.glsl>
+//#
+//in vec4 vertexColor;
+//in vec2 texCoord0;
+//#
+//out vec4 fragColor;
+//? } else {
 #version 330
+#extension GL_ARB_separate_shader_objects : require
 
-#moj_import <minecraft:dynamictransforms.glsl>
+#include <minecraft:dynamictransforms.glsl>
+
+layout(location = 0) in vec4 vertexColor;
+layout(location = 1) in vec2 texCoord0;
+
+layout(location = 0) out vec4 fragColor;
+//? }
 
 uniform sampler2D Sampler0;
-
-in vec4 vertexColor;
-in vec2 texCoord0;
-
-out vec4 fragColor;
 
 // 高亮脉冲：在 footprint.png 原色与纯白之间往复闪烁。
 // 脉冲强度由顶点色 alpha 承载（CPU 端按全局游戏时间算 sin 波写入），不采样 lightmap → 不受世界光照。

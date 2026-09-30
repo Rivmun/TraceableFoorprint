@@ -42,6 +42,7 @@ public class MissingDependencyScreen extends Screen {
 
 	@Override
 	public void onClose() {
-		this.minecraft.setScreen(this.parent);
+		//~ if < 26.2 'minecraft.gui.setScreen' -> 'minecraft.setScreen'
+		this.minecraft.gui.setScreen(this.parent);
 	}
 }

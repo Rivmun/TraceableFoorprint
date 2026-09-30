@@ -71,7 +71,8 @@ public class VersionUtil {
 		//? if <= 1.20.1 {
 		/*return 0.0075F;
 		*///? } else {
-		return Minecraft.getInstance().gameRenderer.getGameRenderState().windowRenderState.appropriateLineWidth;
+		//~ if < 26.2 'gameRenderState' -> 'getGameRenderState'
+		return Minecraft.getInstance().gameRenderer.gameRenderState().windowRenderState.appropriateLineWidth;
 		//? }
 	}
 

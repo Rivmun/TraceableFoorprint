@@ -27,6 +27,8 @@ stonecutter {
                 }
             }
 
+        mc("26.3", "fabric", "neoforge")
+        mc("26.2", "fabric", "neoforge")
         mc("26.1",   "fabric", "neoforge")
 //        mc("1.21.11","fabric", "neoforge")
 //        mc("1.21.1", "fabric", "neoforge")
@@ -36,6 +38,6 @@ stonecutter {
 //        mc("1.18.2", "fabric", "forge")
 //        mc("1.16.5", "fabric", "forge")
 
-        vcsVersion = "26.1-fabric"
+        vcsVersion = "26.3-fabric"
     }
 }

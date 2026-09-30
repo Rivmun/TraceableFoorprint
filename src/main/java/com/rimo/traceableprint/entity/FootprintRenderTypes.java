@@ -1,6 +1,7 @@
 package com.rimo.traceableprint.entity;
 
-import com.mojang.blaze3d.pipeline.RenderPipeline;
+//~ if < 26.3 'renderpearl.api.' -> 'blaze3d.'
+import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.rimo.traceableprint.Common;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.RenderSetup;
@@ -68,8 +69,9 @@ public final class FootprintRenderTypes {
 						"pipeline/footprint_pulse_see_through/" + texture.getPath()))
 				.withVertexShader(PULSE_SHADER)
 				.withFragmentShader(PULSE_SHADER)
-				.withSampler("Sampler0")
 				.withCull(false);
+		//? if <= 26.1 {
+		/*builder.withSampler("Sampler0");
 		for (RenderPipeline.UniformDescription uniform : base.getUniforms()) {
 			if (uniform.textureFormat() != null) {
 				builder.withUniform(uniform.name(), uniform.type(), uniform.textureFormat());
@@ -81,6 +83,33 @@ public final class FootprintRenderTypes {
 		if (base.getColorTargetState() != null) {
 			builder.withColorTargetState(base.getColorTargetState());
 		}
+		*///? } else if <= 26.2 {
+		/*for (com.mojang.blaze3d.pipeline.BindGroupLayout bgl : base.getBindGroupLayouts()) {
+			builder.withBindGroupLayout(bgl);
+		}
+		var vertexFormats = base.getVertexFormatBindings();
+		for (int i = 0; i < vertexFormats.length; i++) {
+			builder.withVertexBinding(i, vertexFormats[i]);
+		}
+		builder.withPrimitiveTopology(base.getPrimitiveTopology());
+		if (base.getColorTargetState() != null) {
+			builder.withColorTargetState(base.getColorTargetState());
+		}
+		*///? } else {
+		// 26.3：渲染管线迁移到 RenderPearly（com.mojang.renderpearl.api.pipeline）；顶点格式/颜色目标 getter 由数组/单数改为 List
+		for (com.mojang.renderpearl.api.pipeline.BindGroupLayout bgl : base.getBindGroupLayouts()) {
+			builder.withBindGroupLayout(bgl);
+		}
+		var vertexFormats = base.getVertexFormatBindings();
+		for (int i = 0; i < vertexFormats.size(); i++) {
+			builder.withVertexBinding(i, vertexFormats.get(i));
+		}
+		builder.withPrimitiveTopology(base.getPrimitiveTopology());
+		var colorTargets = base.getColorTargetStates();
+		for (int i = 0; i < colorTargets.size(); i++) {
+			builder.withColorTargetState(i, colorTargets.get(i));
+		}
+		//? }
 		if (base.getPolygonMode() != null) {
 			builder.withPolygonMode(base.getPolygonMode());
 		}

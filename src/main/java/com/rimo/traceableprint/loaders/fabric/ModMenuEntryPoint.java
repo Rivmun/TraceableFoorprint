@@ -20,7 +20,7 @@ import com.terraformersmc.modmenu.api.ModMenuApi;
 public class ModMenuEntryPoint implements ModMenuApi {
 	@Override
 	public ConfigScreenFactory<?> getModConfigScreenFactory() {
-		return parent -> Platform.isModLoaded("cloth_config")
+		return parent -> Platform.isModLoaded("cloth-config2")
 				? com.rimo.traceableprint.config.ConfigScreen.create(parent)
 				: new MissingDependencyScreen(parent);
 	}
