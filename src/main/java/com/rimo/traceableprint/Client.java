@@ -1,8 +1,13 @@
 package com.rimo.traceableprint;
 
 import com.rimo.traceableprint.config.ConfigScreen;
-//~ if neoforge 'fabric' -> 'neoforge'
+//? if fabric {
 import com.rimo.traceableprint.loaders.fabric.Platform;
+//? } else if neoforge {
+/*import com.rimo.traceableprint.loaders.neoforge.Platform;
+*///? } else if forge {
+/*import com.rimo.traceableprint.loaders.forge.Platform;
+*///? }
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 

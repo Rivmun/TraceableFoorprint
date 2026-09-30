@@ -41,7 +41,8 @@
     "minecraft": "${version_range}"
   },
   "suggests": {
-    "modmenu": "*"
+    "modmenu": "*",
+    "cloth-config2": "*"
   },
   "custom": {
     "modmenu": {

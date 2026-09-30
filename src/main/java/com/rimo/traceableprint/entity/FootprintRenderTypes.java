@@ -164,8 +164,12 @@ public final class FootprintRenderTypes {
 	private static final Map<ResourceLocation, RenderType> SEE_THROUGH_CACHE = new HashMap<>();
 
 	/^* 默认脚印贴图：配置未命中该生物、或指定的贴图在资源包里不存在时使用。 ^/
+	//? if <= 1.20.1 {
+	/^static final ResourceLocation TEXTURE = new ResourceLocation(Common.MOD_ID, "textures/entity/footprint.png");
+	^///? } else {
 	static final ResourceLocation TEXTURE =
 			ResourceLocation.fromNamespaceAndPath(Common.MOD_ID, "textures/entity/footprint.png");
+	//? }
 
 	/^* 非高亮：应用天光、被方块遮挡、支持顶点 alpha 渐淡的原版实体半透明渲染类型。 ^/
 	public static RenderType footprint(ResourceLocation texture) {

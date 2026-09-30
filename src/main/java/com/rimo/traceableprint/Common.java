@@ -2,12 +2,16 @@ package com.rimo.traceableprint;
 
 import com.rimo.traceableprint.config.Config;
 import com.rimo.traceableprint.entity.FootprintEntity;
-import io.netty.buffer.ByteBuf;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+//? if <= 1.20.1 {
+/*import net.minecraft.resources.ResourceLocation;
+*///? } else {
+import io.netty.buffer.ByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.ResourceKey;
+//? }
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 import org.slf4j.Logger;
@@ -47,7 +51,34 @@ public class Common {
 
 	// - - - - - 配置上传：双端共用 payload（纯 vanilla，握手见 DedicatedServer/Client） - - - - -
 
-	/** S2C 空邀约包：服务端校验 op 通过后下发，客户端收到才回传本地配置（防绕过命令直接灌包）。 */
+	//? if <= 1.20.1 {
+	/*/^*
+	 * S2C 空邀约包（1.20.1）：该版本无 CustomPacketPayload/StreamCodec，此处仅作纯数据载体，
+	 * 编解码由 Platform 用 FriendlyByteBuf 走 fabric 通道式 API 手工处理；TYPE 即通道 ResourceLocation。
+	 ^/
+	public static final class UploadRequestPayload {
+		public static final ResourceLocation TYPE = VersionUtil.getId("upload_request");
+
+		public UploadRequestPayload() {
+		}
+	}
+
+	/^* C2S 配置包（1.20.1）：纯数据载体，json 由 Platform 写入/读出 FriendlyByteBuf；TYPE 即通道 ResourceLocation。 ^/
+	public static final class UploadConfigPayload {
+		public static final ResourceLocation TYPE = VersionUtil.getId("upload_config");
+		private final String json;
+
+		public UploadConfigPayload(String json) {
+			this.json = json;
+		}
+
+		public String json() {
+			return json;
+		}
+	}
+	*///? } else {
+	
+	// S2C 空邀约包：服务端校验 op 通过后下发，客户端收到才回传本地配置（防绕过命令直接灌包）。
 	public record UploadRequestPayload() implements CustomPacketPayload {
 		public static final Type<UploadRequestPayload> TYPE =
 				new CustomPacketPayload.Type<>(VersionUtil.getId("upload_request"));
@@ -61,7 +92,7 @@ public class Common {
 		}
 	}
 
-	/** C2S 配置包：客户端把本地 {@link #CONFIG} Gson 序列化成 string 回传服务端。 */
+	// C2S 配置包：客户端把本地 CONFIG Gson 序列化成 string 回传服务端。
 	public record UploadConfigPayload(String json) implements CustomPacketPayload {
 		public static final Type<UploadConfigPayload> TYPE =
 				new CustomPacketPayload.Type<>(VersionUtil.getId("upload_config"));
@@ -73,4 +104,5 @@ public class Common {
 			return TYPE;
 		}
 	}
+	//? }
 }

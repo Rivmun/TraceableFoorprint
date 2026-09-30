@@ -4,11 +4,16 @@ plugins {
 
 val minecraft = property("deps.minecraft") as String
 
-// 1.21.1 legacy 渲染层用不到新版 net/minecraft/client/renderer/rendertype/RenderType.create，
-// 而 traceableprint.accesswidener 里的这条规则在 1.21.1 无对应类，会导致 validateAccessWidener 失败。
-// 故 1.21.1 走空的 traceableprint.legacy.accesswidener（无规则），1.21.11 仍用带规则的 traceableprint.accesswidener。
-val isLegacy1211 = minecraft == "1.21.1"
-val awName = (property("mod.id") as String) + (if (isLegacy1211) ".legacy.accesswidener" else ".accesswidener")
+// <=1.21.1（1.20.1/1.21.1）legacy 渲染层用不到新版 net/minecraft/client/renderer/rendertype/RenderType.create，
+// 而 traceableprint.accesswidener 里的这条规则在这些版本无对应类，会导致 validateAccessWidener 失败。
+// 故 <=1.21.1 走空的 traceableprint.legacy.accesswidener（无规则），1.21.11+ 仍用带规则的 traceableprint.accesswidener。
+// 同理着色器分版：<=1.21.1 用 footprint_legacy，>1.21.1 用 footprint_pulse。
+val segs = minecraft.split(".").mapNotNull { it.toIntOrNull() }
+val mcMajor = segs.getOrElse(0) { 0 }
+val mcMinor = segs.getOrElse(1) { 0 }
+val mcPatch = segs.getOrElse(2) { 0 }
+val isLegacyRender = mcMajor < 1 || (mcMajor == 1 && (mcMinor < 21 || (mcMinor == 21 && mcPatch <= 1)))
+val awName = (property("mod.id") as String) + (if (isLegacyRender) ".legacy.accesswidener" else ".accesswidener")
 
 loom {
     silentMojangMappingsLicense()
@@ -81,10 +86,10 @@ tasks {
     processResources {
         // 只随包发布当前版本选中的那一个 AW：始终排除 unobf 版（属 26.x）与未被选中的 named 变体。
         val id = project.property("mod.id") as String
-        val otherNamedAw = id + (if (isLegacy1211) ".accesswidener" else ".legacy.accesswidener")
+        val otherNamedAw = id + (if (isLegacyRender) ".accesswidener" else ".legacy.accesswidener")
         exclude("**/neoforge.mods.toml", "**/mods.toml", "**/${id}.unobf.accesswidener", "**/$otherNamedAw", "**/*.mcmeta")
         // 分版本只发一套着色器：<=1.21.1 用 legacy（footprint_legacy），>1.21.1 用新版 pipeline（footprint_pulse）；剔除另一套。
-        if (isLegacy1211) exclude("**/footprint_pulse.*") else exclude("**/footprint_legacy.*")
+        if (isLegacyRender) exclude("**/footprint_pulse.*") else exclude("**/footprint_legacy.*")
     }
 
     register<Copy>("buildAndCollect") {
@@ -96,6 +101,13 @@ tasks {
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    val javaCompat = if (stonecutter.eval(stonecutter.current.version, ">=1.21")) {
+        JavaVersion.VERSION_21
+    } else if (stonecutter.eval(stonecutter.current.version, ">=1.18")) {
+        JavaVersion.VERSION_17
+    } else {
+        JavaVersion.VERSION_1_8
+    }
+    sourceCompatibility = javaCompat
+    targetCompatibility = javaCompat
 }

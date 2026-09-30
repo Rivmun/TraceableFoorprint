@@ -120,9 +120,21 @@ public class FootprintEntity extends Entity {
 		this.entityData.set(GEN_TIME, level.getLevelData().getGameTime());
 	}
 
+	//? if <= 1.20.1 {
+	/*// 1.20.1 无 SynchedEntityData.Builder：defineSynchedData() 无参，直接调 this.entityData.define。
+	@Override
+	protected void defineSynchedData() {
+		//【关键】所有 EntityDataAccessor 必须在实体数据构建时注册，否则 entityData.set 会直接崩溃
+		this.entityData.define(PARENT_UUID, "");
+		this.entityData.define(NEXT_UUID, "");
+		this.entityData.define(IS_TAIL, false);
+		this.entityData.define(GEN_TIME, 0L);
+		this.entityData.define(TEX_SCALE, 1.0F);
+		this.entityData.define(TEX_NAME, "");
+	}
+	*///? } else {
 	@Override
 	protected void defineSynchedData(SynchedEntityData.Builder builder) {
-		//【关键】所有 EntityDataAccessor 必须在实体数据构建时注册，否则 entityData.set 会直接崩溃
 		builder.define(PARENT_UUID, "");
 		builder.define(NEXT_UUID, "");
 		builder.define(IS_TAIL, false);
@@ -130,6 +142,7 @@ public class FootprintEntity extends Entity {
 		builder.define(TEX_SCALE, 1.0F);
 		builder.define(TEX_NAME, "");
 	}
+	//? }
 
 	// 设置脚印贴图缩放倍率（仅服务端生成时写入，随实体同步到客户端）
 	public void setTexScale(float scale) {
@@ -185,6 +198,17 @@ public class FootprintEntity extends Entity {
 		}
 	}
 
+	// 统一取随机源：1.20.1 无 Entity#getRandom()，用受保护字段 this.random；>1.20.1 走 getRandom()。
+	//? if <= 1.20.1 {
+	/*private net.minecraft.util.RandomSource rand() {
+		return this.random;
+	}
+	*///? } else {
+	private net.minecraft.util.RandomSource rand() {
+		return this.getRandom();
+	}
+	//? }
+
 	// 生成时的绝对游戏时间（双端可读，走同步数据）
 	public long getGenTime() {
 		return this.entityData.get(GEN_TIME);
@@ -200,7 +224,7 @@ public class FootprintEntity extends Entity {
 		long lifetime = Common.CONFIG.getFootprintLifetimeTicks();
 		if (genTime <= 0 || lifetime <= 0) return 0.0F;
 		long now = this.level().getLevelData().getGameTime();
-		return Math.clamp((float) (now - genTime) / (float) lifetime, 0.0F, 1.0F);
+		return Math.min(1.0F, Math.max(0.0F, (float) (now - genTime) / (float) lifetime));
 	}
 
 	/**
@@ -466,14 +490,14 @@ public class FootprintEntity extends Entity {
 		double distance = delta.length();
 		if (distance < 0.5) return; // 目标过近时方向无意义，且会糊在脚印上干扰脉冲辨认
 		Vec3 dir = delta.scale(1.0 / distance); // 指向目标的单位向量
-		double t = this.getRandom().nextDouble(); // 终点：沿“单位长方向线”随机取点（PORTAL 收敛消失处）
+		double t = this.rand().nextDouble(); // 终点：沿“单位长方向线”随机取点（PORTAL 收敛消失处）
 		// 起点偏移：把 dir 绕竖直轴在左右 ±30° 内随机偏转（保单位长、保俯仰），再沿该方向外推至多 1 方块
-		double angle = Math.toRadians((this.getRandom().nextDouble() * 2.0 - 1.0) * DIRECTION_PARTICLE_CONE_DEGREES);
+		double angle = Math.toRadians((this.rand().nextDouble() * 2.0 - 1.0) * DIRECTION_PARTICLE_CONE_DEGREES);
 		double cos = Math.cos(angle);
 		double sin = Math.sin(angle);
 		double sx = dir.x * cos + dir.z * sin;
 		double sz = -dir.x * sin + dir.z * cos;
-		double len = this.getRandom().nextDouble() * DIRECTION_PARTICLE_SPRAY;
+		double len = this.rand().nextDouble() * DIRECTION_PARTICLE_SPRAY;
 		// 传参语义：(px,py,pz)=终点，(vx,vy,vz)=起点相对终点的偏移
 		level.addParticle(ParticleTypes.PORTAL,
 				ox + dir.x * t, oy + dir.y * t, oz + dir.z * t,

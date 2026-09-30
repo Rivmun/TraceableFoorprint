@@ -248,7 +248,10 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+//? if <= 1.20.1 {
+//? } else {
 import com.mojang.blaze3d.vertex.MeshData;
+//? }
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.renderer.RenderType;
@@ -350,8 +353,27 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity> {
 	 * - setOverlay(OverlayTexture.NO_OVERLAY)：走透明 overlay 行，避免 (0,0) 红色行导致偏红（历史坑）；
 	 * - setNormal(0,1,0)：地面向上法线，供实体方向光计算。
 	 * 该版本 VertexConsumer 用 builder 链、无 endVertex，逐 addVertex 隐式收尾。
+	 *
+	 * 【1.20.1 调用顺序硬约束】该版本 BufferBuilder 是**游标式**写入：每个 setter 先比对当前游标元素的 usage+index，
+	 * 不匹配就静默跳过（游标不前进），endVertex 见游标未归零即抛 "Not filled all elements of the vertex"。
+	 * NEW_ENTITY 的元素顺序是 Position, Color, UV0, UV1(overlay), UV2(light), Normal, Padding，
+	 * 故必须严格按 vertex -> color -> uv -> overlayCoords -> uv2 -> normal 调用（1.21.1+ 为偏移式写入，顺序自由）。
 	 ^/
 	private static void drawFootprintQuad(Matrix4f matrix, VertexConsumer consumer, int light, int vertexAlpha, float half) {
+		//? if <= 1.20.1 {
+		/^consumer.vertex(matrix, -half, 0.0F, -half)
+				.color(255, 255, 255, vertexAlpha).uv(0.0F, 0.0F)
+				.overlayCoords(OverlayTexture.NO_OVERLAY).uv2(light).normal(0.0F, 1.0F, 0.0F).endVertex();
+		consumer.vertex(matrix, -half, 0.0F, half)
+				.color(255, 255, 255, vertexAlpha).uv(0.0F, 1.0F)
+				.overlayCoords(OverlayTexture.NO_OVERLAY).uv2(light).normal(0.0F, 1.0F, 0.0F).endVertex();
+		consumer.vertex(matrix, half, 0.0F, half)
+				.color(255, 255, 255, vertexAlpha).uv(1.0F, 1.0F)
+				.overlayCoords(OverlayTexture.NO_OVERLAY).uv2(light).normal(0.0F, 1.0F, 0.0F).endVertex();
+		consumer.vertex(matrix, half, 0.0F, -half)
+				.color(255, 255, 255, vertexAlpha).uv(1.0F, 0.0F)
+				.overlayCoords(OverlayTexture.NO_OVERLAY).uv2(light).normal(0.0F, 1.0F, 0.0F).endVertex();
+		^///? } else {
 		consumer.addVertex(matrix, -half, 0.0F, -half)
 				.setColor(255, 255, 255, vertexAlpha).setUv(0.0F, 0.0F).setLight(light)
 				.setOverlay(OverlayTexture.NO_OVERLAY).setNormal(0.0F, 1.0F, 0.0F);
@@ -364,6 +386,7 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity> {
 		consumer.addVertex(matrix, half, 0.0F, -half)
 				.setColor(255, 255, 255, vertexAlpha).setUv(1.0F, 0.0F).setLight(light)
 				.setOverlay(OverlayTexture.NO_OVERLAY).setNormal(0.0F, 1.0F, 0.0F);
+		//? }
 	}
 
 	/^*
@@ -387,6 +410,25 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity> {
 		RenderSystem.setShaderTexture(0, texture);
 		RenderSystem.setShader(() -> shader);
 
+		//? if <= 1.20.1 {
+		/^BufferBuilder buffer = Tesselator.getInstance().getBuilder();
+		// POSITION_TEX_COLOR 的元素顺序是 Position, UV0, Color —— 游标式写入要求 uv 先于 color（见 drawFootprintQuad 注释）
+		buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
+		buffer.vertex(matrix, -half, 0.0F, -half).uv(0.0F, 0.0F).color(255, 255, 255, pulseAlpha).endVertex();
+		buffer.vertex(matrix, -half, 0.0F, half).uv(0.0F, 1.0F).color(255, 255, 255, pulseAlpha).endVertex();
+		buffer.vertex(matrix, half, 0.0F, half).uv(1.0F, 1.0F).color(255, 255, 255, pulseAlpha).endVertex();
+		buffer.vertex(matrix, half, 0.0F, -half).uv(1.0F, 0.0F).color(255, 255, 255, pulseAlpha).endVertex();
+
+		// 关深度测试 → 穿墙；开 alpha 混合；关背面剔除（四边形绕向不随朝向固定，避免被剔）
+		RenderSystem.enableBlend();
+		RenderSystem.defaultBlendFunc();
+		RenderSystem.disableCull();
+		RenderSystem.disableDepthTest();
+		BufferUploader.drawWithShader(buffer.end());
+		RenderSystem.enableDepthTest();
+		RenderSystem.enableCull();
+		RenderSystem.disableBlend();
+		^///? } else {
 		BufferBuilder buffer = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
 				DefaultVertexFormat.POSITION_TEX_COLOR);
 		buffer.addVertex(matrix, -half, 0.0F, -half).setColor(255, 255, 255, pulseAlpha).setUv(0.0F, 0.0F);
@@ -405,6 +447,7 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity> {
 		RenderSystem.enableDepthTest();
 		RenderSystem.enableCull();
 		RenderSystem.disableBlend();
+		//? }
 	}
 
 	/^* 懒加载 footprint_legacy 着色器（仅渲染线程、仅高亮首次触发）；编译失败则置标志永久回退，避免逐帧重试刷屏。 ^/
@@ -412,13 +455,15 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity> {
 		if (pulseShader == null && !pulseShaderFailed) {
 			try {
 				// name 经 ResourceLocation.withDefaultNamespace 解析为 minecraft:footprint_legacy，
-				// 读 assets/minecraft/shaders/core/footprint_legacy.{json,vsh,fsh}（仅 1.21.1 的 ShaderInstance 用；其它版本无引用，惰性无害）。
+				// 读 assets/minecraft/shaders/core/footprint_legacy.{json,vsh,fsh}（供本类 <=1.21.1 的即时绘制路径使用；>1.21.1 走 footprint_pulse 管线）。
+				// 该 json 必须同时写 "attributes" 与 "blend"：1.20.1 缺 attributes 会跳过 glBindAttribLocation
+				// 导致颜色/UV 错位（高亮全透明），缺 blend 会被默认 opaque 覆盖掉 CPU 端 enableBlend。
 				pulseShader = new ShaderInstance(Minecraft.getInstance().getResourceManager(), "footprint_legacy",
 							DefaultVertexFormat.POSITION_TEX_COLOR);
 			} catch (Exception e) {
 				pulseShaderFailed = true;
 				// 不静默吞异常：把真实失败原因（常见为 json 缺 values / glsl 编译错 / 资源路径不对）打印到日志，便于定位。
-				LOGGER.error("[traceableprint][1.21.1] footprint_legacy \u7740\u8272\u5668\u52a0\u8f7d\u5931\u8d25\uff0c\u56de\u9000 fullbright \u8fd1\u4f3c", e);
+				LOGGER.error("[traceableprint] footprint_legacy \u7740\u8272\u5668\u52a0\u8f7d\u5931\u8d25\uff0c\u56de\u9000 fullbright \u8fd1\u4f3c", e);
 			}
 		}
 		return pulseShader;

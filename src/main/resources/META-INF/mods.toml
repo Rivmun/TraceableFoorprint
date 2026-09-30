@@ -25,3 +25,10 @@ mandatory = true
 versionRange = "${version_range}"
 ordering = "NONE"
 side = "BOTH"
+
+[[dependencies.${mod_id}]]
+modId = "${cloth_id}"
+mandatory = false
+versionRange = "[1.0,)"
+ordering = "BEFORE"
+side = "CLIENT"

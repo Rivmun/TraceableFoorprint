@@ -3,8 +3,13 @@ package com.rimo.traceableprint;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
 import com.rimo.traceableprint.config.Config;
-//~ if neoforge 'fabric' -> 'neoforge'
+//? if fabric {
 import com.rimo.traceableprint.loaders.fabric.Platform;
+//? } else if neoforge {
+/*import com.rimo.traceableprint.loaders.neoforge.Platform;
+*///? } else if forge {
+/*import com.rimo.traceableprint.loaders.forge.Platform;
+*///? }
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.level.ServerPlayer;
 //? if > 1.21.1 {

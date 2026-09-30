@@ -4,8 +4,13 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
 import com.rimo.traceableprint.Common;
-//~ if neoforge 'fabric' -> 'neoforge'
+//? if fabric {
 import com.rimo.traceableprint.loaders.fabric.Platform;
+//? } else if neoforge {
+/*import com.rimo.traceableprint.loaders.neoforge.Platform;
+*///? } else if forge {
+/*import com.rimo.traceableprint.loaders.forge.Platform;
+*///? }
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;

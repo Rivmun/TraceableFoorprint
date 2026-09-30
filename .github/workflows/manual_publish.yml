@@ -7,7 +7,7 @@ on:
         description: 'input subproject name'
         required: true
         type: string
-        default: '26.3-fabric,26.3-neoforge,26.2-fabric,26.2-neoforge,26.1-fabric,26.1-neoforge,1.21.11-fabric,1.21.11-neoforge,1.21.1-fabric,1.21.1-neoforge'
+        default: '26.3-fabric,26.3-neoforge,26.2-fabric,26.2-neoforge,26.1-fabric,26.1-neoforge,1.21.11-fabric,1.21.11-neoforge,1.21.1-fabric,1.21.1-neoforge,1.20.1-fabric,1.20.1-forge'
 
 jobs:
   prepare-matrix:

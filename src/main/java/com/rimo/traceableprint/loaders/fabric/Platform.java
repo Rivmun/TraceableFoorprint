@@ -12,7 +12,12 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallba
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+//? if <= 1.20.1 {
+/*import io.netty.buffer.Unpooled;
+import net.minecraft.network.FriendlyByteBuf;
+*///? } else {
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+//? }
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.loader.api.FabricLoader;
 //? if > 1.21.1 {
@@ -22,7 +27,10 @@ import net.minecraft.client.renderer.entity.EntityRenderers;
 *///? }
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
+//? if <= 1.20.1 {
+//? } else {
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+//? }
 import net.minecraft.server.level.ServerPlayer;
 
 import java.nio.file.Path;
@@ -35,10 +43,14 @@ public class Platform implements ModInitializer {
 		Registry.register(BuiltInRegistries.ENTITY_TYPE,
 				VersionUtil.getId("footprint"), Common.FOOTPRINT);
 		// 配置上传：注册两个方向的 payload codec（双端都要）；服务端 C2S 接收器在 ServerInit 挂
+		// 1.20.1 无 PayloadTypeRegistry/CustomPacketPayload：走 fabric 通道式 API，收发在 Platform 收发函数、接收器在 ClientInit/ServerInit
+		//? if <= 1.20.1 {
+		//? } else {
 		//~ if >= 26.1 'playS2C' -> 'clientboundPlay'
 		PayloadTypeRegistry.clientboundPlay().register(Common.UploadRequestPayload.TYPE, Common.UploadRequestPayload.CODEC);
 		//~ if >= 26.1 'playC2S' -> 'serverboundPlay'
 		PayloadTypeRegistry.serverboundPlay().register(Common.UploadConfigPayload.TYPE, Common.UploadConfigPayload.CODEC);
+		//? }
 		Common.LOGGER.info("[TraceablePrint] Footprint entity registered");
 	}
 
@@ -65,8 +77,13 @@ public class Platform implements ModInitializer {
 			EntityRendererRegistry.register(Common.FOOTPRINT, FootprintEntityRenderer::new);
 			*///? }
 			// 配置上传：绑定 S2C 邀约接收器（仅客户端）
+			//? if <= 1.20.1 {
+			/*ClientPlayNetworking.registerGlobalReceiver(Common.UploadRequestPayload.TYPE,
+					(client, handler, buf, sender) -> client.execute(Client::handleUploadRequestPayload));
+			*///? } else {
 			ClientPlayNetworking.registerGlobalReceiver(Common.UploadRequestPayload.TYPE,
 					(payload, context) -> Client.handleUploadRequestPayload());
+			//? }
 		}
 	}
 
@@ -78,12 +95,34 @@ public class Platform implements ModInitializer {
 			// 仅专用服务端注册 /traceablefp 命令与 C2S 配置接收器（集成服不走这条初始化路径）
 			CommandRegistrationCallback.EVENT.register(
 					(dispatcher, registryAccess, environment) -> DedicatedServer.registerCommand(dispatcher));
+			//? if <= 1.20.1 {
+			/*ServerPlayNetworking.registerGlobalReceiver(Common.UploadConfigPayload.TYPE,
+					(server, player, handler, buf, sender) -> {
+						String json = buf.readUtf();
+						server.execute(() -> DedicatedServer.handleUploadConfigPayload(new Common.UploadConfigPayload(json), player));
+					});
+			*///? } else {
 			ServerPlayNetworking.registerGlobalReceiver(Common.UploadConfigPayload.TYPE,
 					(payload, context) -> DedicatedServer.handleUploadConfigPayload(payload, context.player()));
+			//? }
 		}
 	}
 
 	// - - - - - Platform specific function - - - - -
+	//? if <= 1.20.1 {
+	/*public static boolean canReceive(ServerPlayer player, net.minecraft.resources.ResourceLocation channel) {
+		return ServerPlayNetworking.canSend(player, channel);
+	}
+	public static void sendToPlayer(ServerPlayer player, Common.UploadRequestPayload payload) {
+		ServerPlayNetworking.send(player, Common.UploadRequestPayload.TYPE, new FriendlyByteBuf(Unpooled.buffer()));
+	}
+	@Environment(EnvType.CLIENT)
+	public static void sendToServer(Common.UploadConfigPayload payload) {
+		FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+		buf.writeUtf(payload.json());
+		ClientPlayNetworking.send(Common.UploadConfigPayload.TYPE, buf);
+	}
+	*///? } else {
 	public static boolean canReceive(ServerPlayer player, CustomPacketPayload.Type<?> type) {
 		return ServerPlayNetworking.canSend(player, type);
 	}
@@ -94,6 +133,7 @@ public class Platform implements ModInitializer {
 	public static void sendToServer(CustomPacketPayload payload) {
 		ClientPlayNetworking.send(payload);
 	}
+	//? }
 	public static boolean isModLoaded(String id) {
 		return FabricLoader.getInstance().isModLoaded(id);
 	}
