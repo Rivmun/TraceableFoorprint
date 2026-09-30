@@ -1,4 +1,14 @@
+<div align="center">
+
+<img src="misc/icon_x8.png" alt="Traceable Print" width="256" height="256">
+
 # Traceable Print
+
+[CurseForge](https://www.curseforge.com/minecraft/mc-mods/traceable-print) · [Modrinth](https://modrinth.com/mod/traceable-print)
+
+[简体中文](README_cn.md) | English
+
+</div>
 
 A multi-platform Minecraft mod that adds **interactable footprint entities**: living entities leave traceable footprints on the ground as they walk, and other players can right-click a footprint to follow the trail step by step until it leads to the creature (or player) that made it.
 

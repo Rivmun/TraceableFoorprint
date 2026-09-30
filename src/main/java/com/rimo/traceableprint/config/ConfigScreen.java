@@ -102,14 +102,14 @@ public class ConfigScreen {
 	private static void buildSpawn(ConfigBuilder builder, ConfigEntryBuilder eb) {
 		ConfigCategory cat = builder.getOrCreateCategory(Component.translatable("text.traceableprint.category.spawn"));
 
-		cat.addEntry(eb.startLongSlider(t("option.lifetime"), CONFIG.getFootprintLifetimeTicks(), 0, 6000)
+		cat.addEntry(eb.startLongSlider(t("option.lifetime"), CONFIG.getFootprintLifetimeTicks(), 600, 12000)
 				.setDefaultValue(Config.DEFAULT_FOOTPRINT_LIFETIME_TICKS)
 				.setTextGetter(ConfigScreen::seconds)
 				.setTooltip(t("option.lifetime.@Tooltip"))
 				.setSaveConsumer(CONFIG::setFootprintLifetimeTicks)
 				.build());
 
-		cat.addEntry(eb.startIntSlider(t("option.spawnInterval"), CONFIG.getSpawnIntervalTicks(), 1, 100)
+		cat.addEntry(eb.startIntSlider(t("option.spawnInterval"), CONFIG.getSpawnIntervalTicks(), 10, 200)
 				.setDefaultValue(Config.DEFAULT_SPAWN_INTERVAL_TICKS)
 				.setTextGetter(ticks -> Component.nullToEmpty(ticks + "t"))
 				.setTooltip(t("option.spawnInterval.@Tooltip"))
@@ -118,7 +118,7 @@ public class ConfigScreen {
 
 		cat.addEntry(eb.startDoubleField(t("option.minDistance"), CONFIG.getMinSpawnDistance())
 				.setDefaultValue(Config.DEFAULT_MIN_SPAWN_DISTANCE)
-				.setMin(0).setMax(16)
+				.setMin(1).setMax(16)
 				.setTooltip(t("option.minDistance.@Tooltip"))
 				.setSaveConsumer(CONFIG::setMinSpawnDistance)
 				.build());
@@ -137,14 +137,14 @@ public class ConfigScreen {
 
 		cat.addEntry(eb.startFloatField(t("option.textureSize"), CONFIG.getFootprintTextureSize())
 				.setDefaultValue(Config.DEFAULT_FOOTPRINT_TEXTURE_SIZE)
-				.setMin(0.01F).setMax(8)
+				.setMin(0.01F).setMax(1.5F)
 				.setTooltip(t("option.textureSize.@Tooltip"))
 				.setSaveConsumer(CONFIG::setFootprintTextureSize)
 				.build());
 
 		cat.addEntry(eb.startFloatField(t("option.yOffset"), CONFIG.getFootprintYOffset())
 				.setDefaultValue(Config.DEFAULT_FOOTPRINT_Y_OFFSET)
-				.setMin(-8).setMax(8)
+				.setMin(-1).setMax(1)
 				.setTooltip(t("option.yOffset.@Tooltip"))
 				.setSaveConsumer(CONFIG::setFootprintYOffset)
 				.build());

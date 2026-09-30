@@ -3,7 +3,7 @@
   "traceableprint.message.be_tracked": "有人在寻找你的踪迹…",
   "traceableprint.message.own_footprints": "这似乎是你自己的足迹…",
 
-  "text.traceableprint.title": "可寻足迹 配置",
+  "text.traceableprint.title": "足影寻踪 配置",
   "text.traceableprint.seconds": "%s 秒",
 
   "text.traceableprint.config.missing_dependency": "未找到 Cloth Config，请在安装后再尝试打开此配置界面。",
