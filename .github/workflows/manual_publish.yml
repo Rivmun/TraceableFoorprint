@@ -7,7 +7,7 @@ on:
         description: 'input subproject name'
         required: true
         type: string
-        default: '1.21.11-fabric,1.21.11-neoforge'
+        default: '26.3-fabric,26.3-neoforge,26.2-fabric,26.2-neoforge,26.1-fabric,26.1-neoforge,1.21.11-fabric,1.21.11-neoforge,1.21.1-fabric,1.21.1-neoforge'
 
 jobs:
   prepare-matrix:
@@ -78,9 +78,9 @@ jobs:
       - name: Publish to Modrinth & CurseForge
         uses: Kir-Antipov/mc-publish@v3.3
         with:
-          modrinth-id: Hoop89kN
+          modrinth-id: JS88OZWj
           modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
-          curseforge-id: 820317
+          curseforge-id: 1719285
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
           github-enabled: false
           files: versions/${{ matrix.version }}/build/libs/*.jar
