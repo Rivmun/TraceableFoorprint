@@ -1,3 +1,4 @@
+//? if > 1.21.1 {
 package com.rimo.traceableprint.entity;
 
 //~ if < 26.3 'renderpearl.api.' -> 'blaze3d.'
@@ -70,7 +71,17 @@ public final class FootprintRenderTypes {
 				.withVertexShader(PULSE_SHADER)
 				.withFragmentShader(PULSE_SHADER)
 				.withCull(false);
-		//? if <= 26.1 {
+		//? if <= 1.21.11 {
+		/*builder.withSampler("Sampler0");
+		for (RenderPipeline.UniformDescription uniform : base.getUniforms()) {
+			if (uniform.textureFormat() != null) {
+				builder.withUniform(uniform.name(), uniform.type(), uniform.textureFormat());
+			} else {
+				builder.withUniform(uniform.name(), uniform.type());
+			}
+		}
+		builder.withVertexFormat(base.getVertexFormat(), base.getVertexFormatMode());
+		*///? } else if <= 26.1 {
 		/*builder.withSampler("Sampler0");
 		for (RenderPipeline.UniformDescription uniform : base.getUniforms()) {
 			if (uniform.textureFormat() != null) {
@@ -82,8 +93,8 @@ public final class FootprintRenderTypes {
 		builder.withVertexFormat(base.getVertexFormat(), base.getVertexFormatMode());
 		if (base.getColorTargetState() != null) {
 			builder.withColorTargetState(base.getColorTargetState());
-		}
-		*///? } else if <= 26.2 {
+		}*/
+		//? } else if <= 26.2 {
 		/*for (com.mojang.blaze3d.pipeline.BindGroupLayout bgl : base.getBindGroupLayouts()) {
 			builder.withBindGroupLayout(bgl);
 		}
@@ -113,7 +124,11 @@ public final class FootprintRenderTypes {
 		if (base.getPolygonMode() != null) {
 			builder.withPolygonMode(base.getPolygonMode());
 		}
+		//? if <= 1.21.11 {
+		/*builder.withDepthTestFunction(com.mojang.blaze3d.platform.DepthTestFunction.NO_DEPTH_TEST); // 关闭深度测试 → 穿墙
+		*///? } else {
 		builder.withDepthStencilState(Optional.empty()); // 关闭深度测试 → 穿墙
+		//? }
 		RenderSetup setup = RenderSetup.builder(builder.build())
 				.withTexture("Sampler0", texture)
 				.createRenderSetup();
@@ -123,3 +138,46 @@ public final class FootprintRenderTypes {
 	private FootprintRenderTypes() {
 	}
 }
+//? } else {
+/*package com.rimo.traceableprint.entity;
+
+import com.rimo.traceableprint.Common;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.resources.ResourceLocation;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/^*
+ * 1.21.1 legacy 渲染类型：该版本没有 RenderPipeline / rendertype 子包 / 自定义脉冲着色器 / accesswidener 工厂，
+ * 只有经典的 {@code net.minecraft.client.renderer.RenderType}。
+ *
+ * 非高亮：{@link RenderType#entityTranslucent(ResourceLocation)}——采样世界 lightmap、被方块正常遮挡、
+ *   且启用 SRC_ALPHA 混合（顶点 alpha 可当不透明度用，实现存续末段渐淡），与新版语义一致。
+ *
+ * 高亮：新版靠自定义 RenderPipeline 穿墙脉冲管线；1.21.1 无该设施，改由渲染器用自定义着色器 footprint_legacy + 即时绘制
+ *   （关深度测试）实现穿墙与原色↔纯白脉冲。本类的 {@link #footprintSeeThrough(ResourceLocation)}（entityTranslucentEmissive）
+ *   仅作为着色器不可用时的回退（fullbright、始终明亮，但不穿墙、不真正变白）。
+ ^/
+public final class FootprintRenderTypes {
+	/^* 高亮渲染类型按贴图缓存（entityTranslucentEmissive 内部已 memoize，这里只是与新版接口对齐、避免重复构造 Map）。 ^/
+	private static final Map<ResourceLocation, RenderType> SEE_THROUGH_CACHE = new HashMap<>();
+
+	/^* 默认脚印贴图：配置未命中该生物、或指定的贴图在资源包里不存在时使用。 ^/
+	static final ResourceLocation TEXTURE =
+			ResourceLocation.fromNamespaceAndPath(Common.MOD_ID, "textures/entity/footprint.png");
+
+	/^* 非高亮：应用天光、被方块遮挡、支持顶点 alpha 渐淡的原版实体半透明渲染类型。 ^/
+	public static RenderType footprint(ResourceLocation texture) {
+		return RenderType.entityTranslucent(texture);
+	}
+
+	/^* 高亮回退：着色器不可用时用的 fullbright 半透明（不受世界光照、常亮）；不穿墙、不变白。主路径见 FootprintEntityRenderer。 ^/
+	public static RenderType footprintSeeThrough(ResourceLocation texture) {
+		return SEE_THROUGH_CACHE.computeIfAbsent(texture, RenderType::entityTranslucentEmissive);
+	}
+
+	private FootprintRenderTypes() {
+	}
+}
+*///? }

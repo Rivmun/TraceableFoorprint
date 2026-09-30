@@ -16,8 +16,12 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+//? if <= 1.21.1 {
+/*import net.minecraft.nbt.CompoundTag;
+*///? } else {
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
+//? }
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -120,14 +124,26 @@ public abstract class LivingEntityMixin {
 
 	// 持久化链尾 UUID：写入生物 NBT，卸载重载/服务端重启后链头不丢（值取自服务端 @Unique 字段）
 	@Inject(method = "addAdditionalSaveData", at = @At("TAIL"))
+	//? if <= 1.21.1 {
+	/*private void traceableprint$saveLastFootprint(CompoundTag tag, CallbackInfo ci) {
+		if (!this.traceableprint$lastFootprint.isEmpty()) tag.putString("TraceablePrintLastFootprint", this.traceableprint$lastFootprint);
+	}
+	*///? } else {
 	private void traceableprint$saveLastFootprint(ValueOutput output, CallbackInfo ci) {
 		if (!this.traceableprint$lastFootprint.isEmpty()) output.putString("TraceablePrintLastFootprint", this.traceableprint$lastFootprint);
 	}
+	//? }
 
 	@Inject(method = "readAdditionalSaveData", at = @At("TAIL"))
+	//? if <= 1.21.1 {
+	/*private void traceableprint$loadLastFootprint(CompoundTag tag, CallbackInfo ci) {
+		this.traceableprint$lastFootprint = tag.getString("TraceablePrintLastFootprint");
+	}
+	*///? } else {
 	private void traceableprint$loadLastFootprint(ValueInput input, CallbackInfo ci) {
 		this.traceableprint$lastFootprint = input.getStringOr("TraceablePrintLastFootprint", "");
 	}
+	//? }
 
 	/**
 	 * 尝试生成脚印：生成闸门（潜行 / 隐形 / 生物名单）→ 区块加载检查 → 朝向/身后落点解算 → 落地方块判定 → 最小间距过滤
@@ -313,6 +329,7 @@ public abstract class LivingEntityMixin {
 			boolean match;
 			if (key.startsWith("#")) {
 				match = false;
+				//~ if >= 26.1 'block.getBlockHolder()' -> 'block.typeHolder()'
 				for (TagKey<Block> tag : block.typeHolder().tags().toList()) {
 					if (key.equals("#" + tag.location())) { match = true; break; }
 				}
@@ -340,6 +357,7 @@ public abstract class LivingEntityMixin {
 		List<String> list = Common.CONFIG.getEntityList();
 		if (list.isEmpty()) return false; // 空名单快通道：免做注册表查表与标签遍历
 		if (list.contains(BuiltInRegistries.ENTITY_TYPE.getKey(parent.getType()).toString())) return true;
+		//~ if >= 26.1 'parent.getType().builtInRegistryHolder()' -> 'parent.typeHolder()'
 		for (TagKey<EntityType<?>> tag : parent.typeHolder().tags().toList()) {
 			if (list.contains("#" + tag.location())) {
 				return true;
@@ -355,6 +373,7 @@ public abstract class LivingEntityMixin {
 	private static boolean traceableprint$isBlockAllowed(ServerLevel world, BlockPos pos) {
 		BlockState block = world.getBlockState(pos);
 		String id = BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString();
+		//~ if >= 26.1 'block.getBlockHolder()' -> 'block.typeHolder()'
 		Holder<Block> holder = block.typeHolder();
 		List<String> apply = Common.CONFIG.getApplyBlocks();
 

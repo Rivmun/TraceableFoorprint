@@ -95,6 +95,8 @@ dependencies {
 tasks {
     processResources {
         exclude("**/fabric.mod.json", "**/*.accesswidener", "**/neoforge.mods.toml")
+        // forge 目标均 <=1.21.1，用 legacy（footprint_legacy）；剔除仅供 >1.21.1 pipeline 的 footprint_pulse。
+        exclude("**/footprint_pulse.*")
     }
 
     register<Copy>("buildAndCollect") {

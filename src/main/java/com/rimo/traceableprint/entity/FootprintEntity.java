@@ -23,8 +23,12 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+//? if <= 1.21.1 {
+/*import net.minecraft.nbt.CompoundTag;
+*///? } else {
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
+//? }
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
@@ -230,7 +234,27 @@ public class FootprintEntity extends Entity {
 		}
 	}
 
-	// 26.1 的 NBT 读写改成了 ValueInput / ValueOutput 流式接口
+	// 26.1 的 NBT 读写改成了 ValueInput / ValueOutput 流式接口；1.21.1 及更早仍用 CompoundTag
+	//? if <= 1.21.1 {
+	/*@Override
+	protected void readAdditionalSaveData(CompoundTag tag) {
+		parseUuid(tag.getString("ParentUUID"))
+				.ifPresent(this::setParentUUID);
+		parseUuid(tag.getString("NextUUID"))
+				.ifPresent(this::setNextUUID);
+		// 恢复生成时间：entityData 此时已就绪则直接写入；缺失时按“当前时刻”兑底，避免因无字段而立即自毁
+		long genTime = tag.contains("GenTime") ? tag.getLong("GenTime") : this.level().getLevelData().getGameTime();
+		try {
+			this.entityData.set(GEN_TIME, genTime);
+		} catch (IllegalStateException e) {
+			this.pendingGenTime = genTime;
+		}
+		// 恢复贴图缩放：缺失时按 1.0（默认大小）兜底
+		this.setTexScale((float) (tag.contains("TexScale") ? tag.getDouble("TexScale") : 1.0D));
+		// 恢复贴图名：缺失时按空串（默认 footprint 贴图）兜底
+		this.setTextureName(tag.getString("TextureName"));
+	}
+	*///? } else {
 	@Override
 	protected void readAdditionalSaveData(ValueInput input) {
 		parseUuid(input.getStringOr("ParentUUID", ""))
@@ -238,7 +262,7 @@ public class FootprintEntity extends Entity {
 		parseUuid(input.getStringOr("NextUUID", ""))
 				.ifPresent(this::setNextUUID);
 		// 恢复生成时间：entityData 此时已就绪则直接写入；
-		// 缺失时按“当前时刻”兜底，避免因无字段而立即自毁
+		// 缺失时按“当前时刻”兑底，避免因无字段而立即自毁
 		long genTime = input.getLongOr("GenTime", this.level().getLevelData().getGameTime());
 		try {
 			this.entityData.set(GEN_TIME, genTime);
@@ -248,11 +272,25 @@ public class FootprintEntity extends Entity {
 		}
 		// 恢复贴图缩放：缺失时按 1.0（默认大小）兜底
 		this.setTexScale((float) input.getDoubleOr("TexScale", 1.0D));
-		// 恢复贴图名：缺失时按空串（默认 footprint 贴图）兜底。存档里的名字可能是旧配置留下的，
+		// 恢复贴图名：缺失时按空串（默认 footprint 贴图）兑底。存档里的名字可能是旧配置留下的，
 		// 如今已从资源包删除也没关系——客户端解析时校验存在性，取不到自然退回默认。
 		this.setTextureName(input.getStringOr("TextureName", ""));
 	}
-
+	//? }
+	
+	//? if <= 1.21.1 {
+	/*@Override
+	protected void addAdditionalSaveData(CompoundTag tag) {
+		tag.putString("ParentUUID", getParentUUID().map(UUID::toString).orElse(""));
+		tag.putString("NextUUID", getNextUUID().map(UUID::toString).orElse(""));
+		tag.putLong("GenTime", this.getGenTime());
+		tag.putDouble("TexScale", this.getTexScale());
+		String textureName = this.getTextureName();
+		if (!textureName.isEmpty()) {
+			tag.putString("TextureName", textureName);
+		}
+	}
+	*///? } else {
 	@Override
 	protected void addAdditionalSaveData(ValueOutput output) {
 		output.putString("ParentUUID", getParentUUID().map(UUID::toString).orElse(""));
@@ -264,10 +302,16 @@ public class FootprintEntity extends Entity {
 			output.putString("TextureName", textureName);
 		}
 	}
+	//? }
 
-	// 26.1 的 Entity.interact 是 (Player, InteractionHand, Vec3) 三参数签名
+	// Entity.interact 的参数个数随版本不同：1.21.11 及更早为 (Player, InteractionHand) 两参数；
+	// 26.1 起加入命中位置 Vec3，变为三参数签名。方法体两者都只用 player/hand，与 location 无关。
 	@Override
+	//? if <= 1.21.11 {
+	/*public @NonNull InteractionResult interact(@NonNull Player player, @NonNull InteractionHand hand) {
+	*///? } else {
 	public @NonNull InteractionResult interact(@NonNull Player player, @NonNull InteractionHand hand, net.minecraft.world.phys.@NonNull Vec3 location) {
+	//? }
 		// 潜行/手持物品时的“对射线透明”已上移到 isPickable()，从拾取阶段源头放行
 		// （潜行或主手有物 → 本脚印根本选不中，interact 不会被调），故此处不再重复潜行判断。
 		// 交互在客户端完全封闭：链数据取 SynchedEntityData 本地副本，高亮是仅点击者可见的本地状态。
@@ -321,8 +365,27 @@ public class FootprintEntity extends Entity {
 	private boolean hasLiveNext() {
 		UUID next = this.getNextUUID().orElse(null);
 		if (next == null) return false;
-		return this.level().getEntity(next) instanceof FootprintEntity fp && !fp.isRemoved();
+		return entityByUuid(this.level(), next) instanceof FootprintEntity fp && !fp.isRemoved();
 	}
+
+	// 1.21.1 的 Level/ClientLevel 仅有 getEntity(int)（网络 id），按 UUID 取实体需分端：服务端走 ServerLevel#getEntity(UUID)，
+	// 客户端遍历本地可见实体；>=1.21.11 起 Level 自带 getEntity(UUID)。
+	//? if <= 1.21.1 {
+	/*private static Entity entityByUuid(Level level, UUID uuid) {
+		if (uuid == null) return null;
+		if (level instanceof ServerLevel serverLevel) return serverLevel.getEntity(uuid);
+		if (level instanceof ClientLevel clientLevel) {
+			for (Entity entity : clientLevel.entitiesForRendering()) {
+				if (entity.getUUID().equals(uuid)) return entity;
+			}
+		}
+		return null;
+	}
+	*///? } else {
+	private static Entity entityByUuid(Level level, UUID uuid) {
+		return level.getEntity(uuid);
+	}
+	//? }
 
 	/**
 	 * 解析本脚印的寻踪目标（纯客户端）：沿 NEXT_UUID 取本地副本中仍存活的下一个脚印；
@@ -331,7 +394,7 @@ public class FootprintEntity extends Entity {
 	 * 交互点亮与方向指示粒子共用本方法，保证“高亮谁”与“烟迹指哪”永远一致。
 	 */
 	private Entity resolveTraceTarget(ClientLevel level) {
-		Entity next = this.getNextUUID().map(level::getEntity).orElse(null);
+		Entity next = this.getNextUUID().map(u -> entityByUuid(level, u)).orElse(null);
 		if (next instanceof FootprintEntity nextFootprint && !nextFootprint.isRemoved()) {
 			return nextFootprint;
 		}
@@ -339,7 +402,7 @@ public class FootprintEntity extends Entity {
 			// 仅当自己确为链尾时，才跳向父实体（否则为被炸断的悬空中段，静默跳过）
 			// 26.1 的 ClientLevel 已不再有 player 字段（只有 players() 列表），本地玩家取 Minecraft#player；
 			// 本方法只在客户端分支被调（instanceof ClientLevel 已守卫），取不到玩家时为 null，不影响判等。
-			Entity parent = this.getParentUUID().map(level::getEntity).orElse(null);
+			Entity parent = this.getParentUUID().map(u -> entityByUuid(level, u)).orElse(null);
 			if (parent instanceof LivingEntity living && living != Minecraft.getInstance().player && !living.isRemoved()) {
 				return living;
 			}
@@ -488,7 +551,11 @@ public class FootprintEntity extends Entity {
 	}
 
 	@Override
+	//? if <= 1.21.1 {
+	/*public boolean hurt(DamageSource source, float damage) {
+	*///? } else {
 	public boolean hurtServer(ServerLevel level, DamageSource source, float damage) {
+	//? }
 		// 爆炸伤害（TNT、苦力帕等）：清除自身脚印（仅移除自己，链上其它脚印由客户端断链验证自然兜住）；其余伤害一概无效
 		if (source.is(DamageTypeTags.IS_EXPLOSION)) {
 			this.discard();
@@ -508,7 +575,11 @@ public class FootprintEntity extends Entity {
 	}
 
 	@Override
+	//? if <= 1.21.1 {
+	/*public boolean canBeCollidedWith() {
+	*///? } else {
 	public boolean canBeCollidedWith(Entity entity) {
+	//? }
 		return false; // 不阻挡移动、不与其他实体碰撞
 	}
 

@@ -69,6 +69,8 @@ tasks {
         // 只排除 named 版 AW（与本 unobf 构建无关），保留 traceableprint.unobf.accesswidener 随包发布，
         // 供 Fabric 运行期按 fabric.mod.json 的 accessWidener 字段加载（loom-no-remap 不会自动回注）。
         exclude("**/neoforge.mods.toml", "**/mods.toml", "**/${project.property("mod.id")}.accesswidener")
+        // 26.x 走新版 RenderPipeline + footprint_pulse；剔除仅供 <=1.21.1 的 footprint_legacy。
+        exclude("**/footprint_legacy.*")
     }
 }
 

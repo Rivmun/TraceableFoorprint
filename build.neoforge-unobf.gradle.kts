@@ -68,6 +68,8 @@ dependencies {
 tasks {
     processResources {
         exclude("**/fabric.mod.json", "**/mods.toml", "**/*.accesswidener")
+        // 26.x 走新版 RenderPipeline + footprint_pulse；剔除仅供 <=1.21.1 的 footprint_legacy。
+        exclude("**/footprint_legacy.*")
     }
 
     jar {

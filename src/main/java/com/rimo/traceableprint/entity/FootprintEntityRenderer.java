@@ -1,3 +1,4 @@
+//? if > 1.21.1 {
 package com.rimo.traceableprint.entity;
 
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -12,6 +13,7 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
+//~ if >= 26.1 'client.renderer.state.CameraRenderState' -> 'client.renderer.state.level.CameraRenderState'
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.Identifier;
@@ -232,3 +234,199 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		public AABB outlineBox;
 	}
 }
+//? } else {
+/*package com.rimo.traceableprint.entity;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.math.Axis;
+import com.rimo.traceableprint.Common;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.MultiBufferSource;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.BufferUploader;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.MeshData;
+import com.mojang.blaze3d.vertex.Tesselator;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.ShaderInstance;
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
+import net.minecraft.client.renderer.entity.EntityRenderer;
+import net.minecraft.client.renderer.entity.EntityRendererProvider;
+import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4f;
+
+/^*
+ * 1.21.1 legacy 实体渲染器：该版本实体渲染仍是经典的 {@code EntityRenderer<T>}（单泛型），
+ * 没有 RenderState / extractRenderState / submit / SubmitNodeCollector / RenderPipeline / 自定义脉冲着色器。
+ * 逐帧在 {@code render(...)} 里直接从实体取值、向 {@code MultiBufferSource} 缓冲绘制一个四边形薄片。
+ *
+ * 非高亮：{@link FootprintRenderTypes#footprint(ResourceLocation)}（entityTranslucent）——采样 lightmap、
+ *   被方块遮挡、SRC_ALPHA 混合让顶点 alpha 当不透明度用，实现存续末段渐淡；光照取传入的 packedLight。
+ * 高亮：自定义着色器 footprint_legacy + 即时绘制（Tesselator/BufferUploader，关深度测试）——原色↔纯白随顶点 alpha 脉冲，
+ *   且穿墙显示；着色器不可用时回退到 {@link FootprintRenderTypes#footprintSeeThrough(ResourceLocation)}（fullbright，alpha 不低于 0.5）。
+ * 瞄准判定框：准星命中本脚印时用 {@link LevelRenderer#renderLineBox} 复刻原版选中方块的黑色半透明线框。
+ ^/
+public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity> {
+	// 贴图抬高量：生成时 0.02，随存续时间线性下沉到 0.01（下限避开与地面共面的 z-fight）
+	private static final float RENDER_Y_AT_BIRTH = 0.02F;
+	private static final float RENDER_Y_AT_DEATH = 0.01F;
+	// 判定框微量外扩，避免底边与地面方块顶面共面闪
+	private static final double OUTLINE_INFLATE = 0.004;
+	// 原版选中方块框：黑色 alpha=102/255
+	private static final float OUTLINE_RED = 0.0F;
+	private static final float OUTLINE_GREEN = 0.0F;
+	private static final float OUTLINE_BLUE = 0.0F;
+	private static final float OUTLINE_ALPHA = 102.0F / 255.0F;
+	// fullbright 光照坐标（高亮 emissive 回退路径用，不受世界光照影响）
+	private static final int FULL_BRIGHT = 0xF000F0;
+	// 1.21.1 无 RenderPipeline / AW 工厂，穿墙纯白脉冲改由自定义着色器 footprint_legacy + 即时绘制实现。
+	// 懒加载：首次高亮绘制时在渲染线程编译 ShaderInstance；失败则永久回退到批量 fullbright 近似（不逐帧重试）。
+	private static ShaderInstance pulseShader;
+	private static boolean pulseShaderFailed;
+	private static final Logger LOGGER = LogUtils.getLogger();
+
+	public FootprintEntityRenderer(EntityRendererProvider.Context context) {
+		super(context);
+		this.shadowRadius = 0.0F;
+		this.shadowStrength = 0.0F;
+	}
+
+	@Override
+	public void render(FootprintEntity entity, float entityYaw, float partialTick, PoseStack poseStack,
+			MultiBufferSource bufferSource, int packedLight) {
+		// 瞄准判定框先画，且在 yaw 旋转之前：此时位堆栈落在实体原点、AABB 轴对齐，不随贴图旋转
+		if (entity.isPickable() && Minecraft.getInstance().hitResult instanceof EntityHitResult hit
+				&& hit.getEntity() == entity) {
+			Vec3 pos = entity.getPosition(partialTick);
+			AABB box = entity.getBoundingBox().inflate(OUTLINE_INFLATE).move(-pos.x, -pos.y, -pos.z);
+			LevelRenderer.renderLineBox(poseStack, bufferSource.getBuffer(RenderType.lines()), box,
+					OUTLINE_RED, OUTLINE_GREEN, OUTLINE_BLUE, OUTLINE_ALPHA);
+		}
+
+		poseStack.pushPose();
+		// 抬高并随存续下沉：按整段生命线性插值 0.02 -> 0.01
+		float renderY = Mth.lerp(entity.getLifeProgress(), RENDER_Y_AT_BIRTH, RENDER_Y_AT_DEATH);
+		poseStack.translate(0.0F, renderY, 0.0F);
+		// 绕 Y 旋转对齐朝向：原版 EntityRenderDispatcher 同款约定 rotationDegrees(180 - yaw)
+		poseStack.mulPose(Axis.YP.rotationDegrees(180.0F - entity.getYRot()));
+		// 缩放仅作用于贴图四边形所在的局部 X/Z（抬高量已先行提交、不受影响）
+		float texScale = entity.getTexScale();
+		if (texScale > 0.0F) {
+			poseStack.scale(texScale, 1.0F, texScale);
+		}
+
+		ResourceLocation texture = FootprintTextures.resolve(entity.getTextureName());
+		// 基准半尺寸：配置正方形边长之半；texScale 已由位堆栈缩放乘上
+		float half = Common.CONFIG.getFootprintTextureSize() * 0.5F;
+		Matrix4f matrix = poseStack.last().pose();
+		if (entity.isHighlighted()) {
+			// 高亮：穿墙 + 原色↔纯白脉冲。世界游戏时间（+插值）正弦作脉冲强度，随顶点色 alpha 传入着色器做 mix(texColor,white,pulse)。
+			double gameTime = entity.level().getGameTime() + partialTick;
+			float pulse = (float) ((Math.sin(gameTime * 0.15) + 1.0) * 0.5);
+			renderSeeThroughPulse(poseStack, bufferSource, texture, half, pulse);
+		} else {
+			int fadeAlpha = (int) (Mth.clamp(entity.getFadeAlpha(), 0.0F, 1.0F) * 255.0F);
+			drawFootprintQuad(matrix, bufferSource.getBuffer(FootprintRenderTypes.footprint(texture)),
+					packedLight, fadeAlpha, half);
+		}
+		poseStack.popPose();
+
+		super.render(entity, entityYaw, partialTick, poseStack, bufferSource, packedLight);
+	}
+
+	/^*
+	 * 画一张脚印四边形。1.21.1 的 entityTranslucent 顶点格式含 UV1(overlay)/UV2(light)/Normal，须显式给出：
+	 * - setLight(light)：UV2 = 实体处光照，供 lightmap 采样得到昼夜与火把亮度；
+	 * - setOverlay(OverlayTexture.NO_OVERLAY)：走透明 overlay 行，避免 (0,0) 红色行导致偏红（历史坑）；
+	 * - setNormal(0,1,0)：地面向上法线，供实体方向光计算。
+	 * 该版本 VertexConsumer 用 builder 链、无 endVertex，逐 addVertex 隐式收尾。
+	 ^/
+	private static void drawFootprintQuad(Matrix4f matrix, VertexConsumer consumer, int light, int vertexAlpha, float half) {
+		consumer.addVertex(matrix, -half, 0.0F, -half)
+				.setColor(255, 255, 255, vertexAlpha).setUv(0.0F, 0.0F).setLight(light)
+				.setOverlay(OverlayTexture.NO_OVERLAY).setNormal(0.0F, 1.0F, 0.0F);
+		consumer.addVertex(matrix, -half, 0.0F, half)
+				.setColor(255, 255, 255, vertexAlpha).setUv(0.0F, 1.0F).setLight(light)
+				.setOverlay(OverlayTexture.NO_OVERLAY).setNormal(0.0F, 1.0F, 0.0F);
+		consumer.addVertex(matrix, half, 0.0F, half)
+				.setColor(255, 255, 255, vertexAlpha).setUv(1.0F, 1.0F).setLight(light)
+				.setOverlay(OverlayTexture.NO_OVERLAY).setNormal(0.0F, 1.0F, 0.0F);
+		consumer.addVertex(matrix, half, 0.0F, -half)
+				.setColor(255, 255, 255, vertexAlpha).setUv(1.0F, 0.0F).setLight(light)
+				.setOverlay(OverlayTexture.NO_OVERLAY).setNormal(0.0F, 1.0F, 0.0F);
+	}
+
+	/^*
+	 * 穿墙 + 原色↔纯白脉冲高亮：用自定义着色器 footprint_legacy（mix 原色/纯白、不采样 lightmap）即时绘制一张四边形，
+	 * 绘制期间关闭深度测试 → 穿墙。ModelViewMat/ProjMat 由 {@code BufferUploader.drawWithShader} 从 RenderSystem 自动带入，
+	 * 顶点位置仍用 {@code poseStack.last().pose()} 做 CPU 烘焙，与批量非高亮路径一致（因而位置观感与原版吻合）。
+	 * 着色器不可用时回退到批量 fullbright emissive，并把整体 alpha 抬到不低于 0.5，避免旧的“全透明”闪烁。
+	 ^/
+	private static void renderSeeThroughPulse(PoseStack poseStack, MultiBufferSource bufferSource,
+			ResourceLocation texture, float half, float pulse) {
+		Matrix4f matrix = poseStack.last().pose();
+		ShaderInstance shader = getOrCreatePulseShader();
+		if (shader == null) {
+			int alpha = (int) (Mth.clamp(0.5F + 0.5F * pulse, 0.0F, 1.0F) * 255.0F);
+			drawFootprintQuad(matrix, bufferSource.getBuffer(FootprintRenderTypes.footprintSeeThrough(texture)),
+					FULL_BRIGHT, alpha, half);
+			return;
+		}
+
+		int pulseAlpha = (int) (Mth.clamp(pulse, 0.0F, 1.0F) * 255.0F);
+		RenderSystem.setShaderTexture(0, texture);
+		RenderSystem.setShader(() -> shader);
+
+		BufferBuilder buffer = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS,
+				DefaultVertexFormat.POSITION_TEX_COLOR);
+		buffer.addVertex(matrix, -half, 0.0F, -half).setColor(255, 255, 255, pulseAlpha).setUv(0.0F, 0.0F);
+		buffer.addVertex(matrix, -half, 0.0F, half).setColor(255, 255, 255, pulseAlpha).setUv(0.0F, 1.0F);
+		buffer.addVertex(matrix, half, 0.0F, half).setColor(255, 255, 255, pulseAlpha).setUv(1.0F, 1.0F);
+		buffer.addVertex(matrix, half, 0.0F, -half).setColor(255, 255, 255, pulseAlpha).setUv(1.0F, 0.0F);
+
+		// 关深度测试 → 穿墙；开 alpha 混合；关背面剔除（四边形绕向不随朝向固定，避免被剔）
+		RenderSystem.enableBlend();
+		RenderSystem.defaultBlendFunc();
+		RenderSystem.disableCull();
+		RenderSystem.disableDepthTest();
+		try (MeshData mesh = buffer.buildOrThrow()) {
+			BufferUploader.drawWithShader(mesh);
+		}
+		RenderSystem.enableDepthTest();
+		RenderSystem.enableCull();
+		RenderSystem.disableBlend();
+	}
+
+	/^* 懒加载 footprint_legacy 着色器（仅渲染线程、仅高亮首次触发）；编译失败则置标志永久回退，避免逐帧重试刷屏。 ^/
+	private static ShaderInstance getOrCreatePulseShader() {
+		if (pulseShader == null && !pulseShaderFailed) {
+			try {
+				// name 经 ResourceLocation.withDefaultNamespace 解析为 minecraft:footprint_legacy，
+				// 读 assets/minecraft/shaders/core/footprint_legacy.{json,vsh,fsh}（仅 1.21.1 的 ShaderInstance 用；其它版本无引用，惰性无害）。
+				pulseShader = new ShaderInstance(Minecraft.getInstance().getResourceManager(), "footprint_legacy",
+							DefaultVertexFormat.POSITION_TEX_COLOR);
+			} catch (Exception e) {
+				pulseShaderFailed = true;
+				// 不静默吞异常：把真实失败原因（常见为 json 缺 values / glsl 编译错 / 资源路径不对）打印到日志，便于定位。
+				LOGGER.error("[traceableprint][1.21.1] footprint_legacy \u7740\u8272\u5668\u52a0\u8f7d\u5931\u8d25\uff0c\u56de\u9000 fullbright \u8fd1\u4f3c", e);
+			}
+		}
+		return pulseShader;
+	}
+
+	@Override
+	public ResourceLocation getTextureLocation(FootprintEntity entity) {
+		return FootprintTextures.resolve(entity.getTextureName());
+	}
+}
+*///? }

@@ -1,5 +1,6 @@
 package com.rimo.traceableprint.entity;
 
+//~ if < 1.21.11 'Identifier' -> 'ResourceLocation' {
 import com.rimo.traceableprint.Common;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
@@ -102,3 +103,4 @@ public final class FootprintTextures {
 	private FootprintTextures() {
 	}
 }
+//~ }

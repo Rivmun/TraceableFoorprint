@@ -25,7 +25,10 @@ import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
+//? if <= 1.21.1 {
+//? } else {
 import net.neoforged.neoforge.client.network.ClientPacketDistributor;
+//? }
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.registries.RegisterEvent;
 
@@ -104,7 +107,11 @@ public class Platform {
 	}
 	@OnlyIn(Dist.CLIENT)
 	public static void sendToServer(CustomPacketPayload payload) {
+		//? if <= 1.21.1 {
+		/^PacketDistributor.sendToServer(payload); // 1.21.1（NeoForge 21.1）无 ClientPacketDistributor，sendToServer 仍在 PacketDistributor 上
+		^///? } else {
 		ClientPacketDistributor.sendToServer(payload);
+		//? }
 	}
 	public static boolean isModLoaded(String id) {
 		return ModList.get().isLoaded(id);

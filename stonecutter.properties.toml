@@ -1,13 +1,13 @@
 mod.id="traceableprint"
 mod.name="Traceable Print"
 mod.version="1.0.0"
-mod.description="Add interactable footprint for mob that can tracing where they move to the Minecraft."
+mod.description="Added interactive footprints that allow you to track the mob that left them."
 mod.author="Rimo"
 mod.contributor="You"
 mod.sources="https://github.com/Rivmun/TraceablePrint"
 mod.issues="https://github.com/Rivmun/TraceablePrint/issues"
-mod.homepage="https://www.curseforge.com/minecraft/mc-mods/superfancyclouds-refabricated"
-mod.modrinth="https://modrinth.com/mod/superfancyclouds-refabricated"
+mod.homepage="https://www.curseforge.com/minecraft/mc-mods/traceable-print"
+mod.modrinth="https://modrinth.com/mod/traceable-print"
 mod.mcmod="https://www.mcmod.cn/class/9053.html"
 mod.license="GPL-3.0-or-later"
 mod.icon="icon.png"
@@ -59,6 +59,38 @@ version_range="[26.1,26.2)"
 deps.neoforge="26.1.2.75"
 neoforge_min_version="26.1"
 deps.cloth="26.1.154"
+
+["1.21.11-fabric"]
+deps.minecraft="1.21.11"
+version_range="=1.21.11"
+deps.fabric="0.18.4"
+deps.fabric-api="0.141.3+1.21.11"
+deps.modmenu="17.0.0"
+deps.cloth="21.11.153"
+
+["1.21.11-neoforge"]
+loom.platform="neoforge"
+deps.minecraft="1.21.11"
+version_range="[1.21.11]"
+deps.neoforge="21.11.42"
+neoforge_min_version="21.11"
+deps.cloth="21.11.153"
+
+["1.21.1-fabric"]
+deps.minecraft="1.21.1"
+version_range="=1.21.1"
+deps.fabric="0.18.4"
+deps.fabric-api="0.116.9+1.21.1"
+deps.modmenu="11.0.1"
+deps.cloth="15.0.140"
+
+["1.21.1-neoforge"]
+loom.platform="neoforge"
+deps.minecraft="1.21.1"
+version_range="[1.21.1]"
+deps.neoforge="21.1.219"
+neoforge_min_version="21.1"
+deps.cloth="15.0.140"
 
 ["1.20.1-forge"]
 loom.platform="forge"

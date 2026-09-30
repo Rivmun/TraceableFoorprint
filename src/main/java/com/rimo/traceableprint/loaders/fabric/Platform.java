@@ -8,13 +8,18 @@ import com.rimo.traceableprint.VersionUtil;
 import com.rimo.traceableprint.entity.FootprintEntityRenderer;
 import net.fabricmc.api.*;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+//~ if >= 26.1 'ClientCommandManager' -> 'ClientCommands'
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.loader.api.FabricLoader;
+//? if > 1.21.1 {
 import net.minecraft.client.renderer.entity.EntityRenderers;
+//? } else {
+/*import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
+*///? }
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -30,7 +35,9 @@ public class Platform implements ModInitializer {
 		Registry.register(BuiltInRegistries.ENTITY_TYPE,
 				VersionUtil.getId("footprint"), Common.FOOTPRINT);
 		// 配置上传：注册两个方向的 payload codec（双端都要）；服务端 C2S 接收器在 ServerInit 挂
+		//~ if >= 26.1 'playS2C' -> 'clientboundPlay'
 		PayloadTypeRegistry.clientboundPlay().register(Common.UploadRequestPayload.TYPE, Common.UploadRequestPayload.CODEC);
+		//~ if >= 26.1 'playC2S' -> 'serverboundPlay'
 		PayloadTypeRegistry.serverboundPlay().register(Common.UploadConfigPayload.TYPE, Common.UploadConfigPayload.CODEC);
 		Common.LOGGER.info("[TraceablePrint] Footprint entity registered");
 	}
@@ -43,14 +50,20 @@ public class Platform implements ModInitializer {
 			// 仅客户端命令 /traceableprintconfig：游戏内直接打开配置屏。
 			// 命令名刻意不含空格——带空格的命令会因命令前缀与服务端专用命令冲突而被覆盖。
 			ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
+					//~ if >= 26.1 'ClientCommandManager' -> 'ClientCommands'
 					dispatcher.register(ClientCommands.literal("traceableprintconfig")
 							.executes(ctx -> {
 								Client.openConfigScreen();
 								return 1;
 							})));
-			// 注册脚印实体渲染器（RenderState 模式）。
-			// 原 EntityRendererRegistry 已弃用，改用通过 Fabric TAW 公开的原版 EntityRenderers.register
+			// 注册脚印实体渲染器。
+			//? if > 1.21.1 {
+			// 新版：原 EntityRendererRegistry 已弃用，改用通过 Fabric TAW 公开的原版 EntityRenderers.register
 			EntityRenderers.register(Common.FOOTPRINT, FootprintEntityRenderer::new);
+			//? } else {
+			/*// 1.21.1：EntityRenderers.register 仍为 private（无 TAW 公开），走 fabric-api 的 EntityRendererRegistry
+			EntityRendererRegistry.register(Common.FOOTPRINT, FootprintEntityRenderer::new);
+			*///? }
 			// 配置上传：绑定 S2C 邀约接收器（仅客户端）
 			ClientPlayNetworking.registerGlobalReceiver(Common.UploadRequestPayload.TYPE,
 					(payload, context) -> Client.handleUploadRequestPayload());

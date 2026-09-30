@@ -1,0 +1,6 @@
+accessWidener   v2  named
+
+# 1.21.1 legacy 渲染层不使用 RenderType.create（无自定义脉冲管线/AW 工厂），
+# 仅用公共 net.minecraft.client.renderer.RenderType.entityTranslucent/entityTranslucentEmissive，
+# 因此本 AW 无规则；单独成文件以避免 traceableprint.accesswidener 里的
+# net/minecraft/client/renderer/rendertype/RenderType 规则在 1.21.1 下 validateAccessWidener 失败。

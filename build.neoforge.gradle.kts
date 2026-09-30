@@ -62,12 +62,19 @@ dependencies {
     mappings(loom.officialMojangMappings())
     neoForge("net.neoforged:neoforge:${property("deps.neoforge")}")
 
-    //
+    // @NonNull 注解（org.jspecify）：新版由映射自带，旧版（1.21.1）需显式提供
+    compileOnly("org.jspecify:jspecify:1.0.0")
+
+    modApi("me.shedaniel.cloth:cloth-config-neoforge:${property("deps.cloth")}") {
+        exclude(group = "net.fabricmc.fabric-api")
+    }
 }
 
 tasks {
     processResources {
         exclude("**/fabric.mod.json", "**/mods.toml", "**/*.accesswidener")
+        // 分版本只发一套着色器：<=1.21.1 用 legacy（footprint_legacy），>1.21.1 用新版 pipeline（footprint_pulse）；剔除另一套。
+        if (minecraft == "1.21.1") exclude("**/footprint_pulse.*") else exclude("**/footprint_legacy.*")
     }
 
     register<Copy>("buildAndCollect") {

@@ -7,8 +7,10 @@ import com.rimo.traceableprint.config.Config;
 import com.rimo.traceableprint.loaders.fabric.Platform;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.level.ServerPlayer;
+//? if > 1.21.1 {
 import net.minecraft.server.permissions.Permission;
 import net.minecraft.server.permissions.Permissions;
+//? }
 
 import java.util.Map;
 import java.util.UUID;
@@ -29,7 +31,11 @@ import static net.minecraft.commands.Commands.literal;
  */
 public class DedicatedServer {
 	// 上传/开关所需最低权限：op 等级 2（GAMEMASTER，与多数影响玩法的命令一致）
+	//? if <= 1.21.1 {
+	/*private static final int REQUIRED_PERMISSION = 2; // 1.21.1 无 Permission/Permissions 类型，直接用 op 等级数字
+	*///? } else {
 	private static final Permission REQUIRED_PERMISSION = Permissions.COMMANDS_GAMEMASTER;
+	//? }
 	private static final long SOLICIT_TTL_MS = 20_000L;    // 邀约令牌有效期
 	private static final long UPLOAD_COOLDOWN_MS = 3_000L; // /upload 命令冷却，防连点重复邀约
 	private static final int MAX_JSON_LEN = 256 * 1024;    // 上传配置 JSON 体积上限（256 KiB）
@@ -104,7 +110,11 @@ public class DedicatedServer {
 	 * 仅在「发送方有 op 权限」且「命中未过期邀约令牌」时应用并落盘；权限不足按约定固定语句报错。
 	 */
 	public static void handleUploadConfigPayload(Common.UploadConfigPayload payload, ServerPlayer player) {
+		//? if <= 1.21.1 {
+		/*if (player.getServer().getProfilePermissions(player.getGameProfile()) < REQUIRED_PERMISSION) {
+		*///? } else {
 		if (!player.permissions().hasPermission(REQUIRED_PERMISSION)) {
+		//? }
 			Common.LOGGER.error("We're receiving a config but that client hasn't permission to do so, it's probably a bug.");
 			return;
 		}
@@ -133,6 +143,10 @@ public class DedicatedServer {
 	}
 
 	private static boolean permitted(CommandContext<CommandSourceStack> ctx) {
+		//? if <= 1.21.1 {
+		/*return ctx.getSource().hasPermission(REQUIRED_PERMISSION);
+		*///? } else {
 		return ctx.getSource().permissions().hasPermission(REQUIRED_PERMISSION);
+		//? }
 	}
 }

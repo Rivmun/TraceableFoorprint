@@ -7,7 +7,6 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
@@ -36,7 +35,11 @@ public class Common {
 			.sized(0.75f, 0.1f) // 判定范围：薄薄一层贴在地面
 			.updateInterval(10) // 不需要同步太多数据
 			.clientTrackingRange(6) // 实体同步距离：6 区块（96 格）内玩家可见脚印出现与状态变化，作为寻踪线索稍远一些更合适
+			//? if <= 1.21.1 {
+			/*.build("footprint");
+			*///? } else {
 			.build(FOOTPRINT_KEY);
+			//? }
 
 	public static void init() {
 		// Platform-specific registration happens in loaders

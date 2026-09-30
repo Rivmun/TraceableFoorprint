@@ -64,14 +64,18 @@ public class VersionUtil {
 
 	/**
 	 * 原版“准星选中方块”线框的线宽：跟随窗口缩放，高分辨率下不会细到看不见。
-	 * 新版取自 WindowRenderState#appropriateLineWidth（每帧由窗口缩放算出）；
-	 * 旧版（1.20.1）原版用的是固定线宽 0.0075。
+	 * 26.x 取自 WindowRenderState#appropriateLineWidth（每帧由窗口缩放算出）；
+	 * 1.21.11 尚无该渲染状态，改取 Window#getAppropriateLineWidth（同为逐顶点线宽量纲）。
+	 * 注：这套逐顶点 setLineWidth 机制下宽度不再是以前的 GL 固定值，切勿回退成 0.0075（会亚像素隐形）。
 	 */
 	public static float getBlockOutlineLineWidth() {
-		//? if <= 1.20.1 {
-		/*return 0.0075F;
+		//? if <= 1.21.1 {
+		/*return 2.0F;
+		*///? } else if <= 1.21.11 {
+		/*return Minecraft.getInstance().getWindow().getAppropriateLineWidth();
+		*///? } else if <= 26.1 {
+		/*return Minecraft.getInstance().gameRenderer.getGameRenderState().windowRenderState.appropriateLineWidth;
 		*///? } else {
-		//~ if < 26.2 'gameRenderState' -> 'getGameRenderState'
 		return Minecraft.getInstance().gameRenderer.gameRenderState().windowRenderState.appropriateLineWidth;
 		//? }
 	}
@@ -81,7 +85,7 @@ public class VersionUtil {
 	 * 旧版（1.20.1）尚无此选项，按未开启处理。
 	 */
 	public static boolean isHighContrastBlockOutline() {
-		//? if <= 1.20.1 {
+		//? if <= 1.21.1 {
 		/*return false;
 		*///? } else {
 		return Minecraft.getInstance().options.highContrastBlockOutline().get();
