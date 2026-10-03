@@ -1,6 +1,6 @@
 mod.id="traceableprint"
 mod.name="Traceable Print"
-mod.version="1.0.0"
+mod.version="1.0.1"
 mod.description="Added interactive footprints that allow you to track the mob that left them."
 mod.author="Rimo"
 mod.contributor="You"

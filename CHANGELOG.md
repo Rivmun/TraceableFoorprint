@@ -1,3 +1,6 @@
+# 1.0.1
+- Internal improve.
+
 # 1.0.0
 
 Initial release.
@@ -47,7 +50,8 @@ Initial release.
 - In-game config screen (Cloth Config, via Mod Menu on Fabric / mod config button), covering lifetime, spawn interval, minimum distance, highlight duration, direction particles, invisible-entity behavior, hardness gate, block/entity lists and all per-mob tables; every option has reset-to-default.
 - Plain JSON config at `config/traceableprint.json`, loaded at startup and auto-saved; unknown/missing keys fall back to defaults for forward compatibility.
 - Dedicated-server commands (op level 2): `/traceableprint setEnable off|player|all` to switch the work mode without opening the config screen, and `/traceableprint upload` to pull the executing player's client config onto the server.
-- Available for Fabric and NeoForge on MC 26.1, 26.2 and 26.3, and for Forge on 1.20.1.
+- Available for Fabric / NeoForge on MC 1.21.1, 1.21.11, 26.1, 26.2, 26.3, and for Forge / Fabric on 1.20.1.
+  - 26.x is single jar for all loaders by Forgix.
 - Open the config screen from anywhere in-game with the client command `/traceableprintconfig` — no Mod Menu required, so it also works on NeoForge and in singleplayer.
 - If the config library isn't installed, opening the config shows a clear in-game notice screen explaining what's missing instead of erroring out.
 - English and Simplified Chinese localizations.

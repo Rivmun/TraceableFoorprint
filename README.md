@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="misc/icon_x8.png" alt="Traceable Print" width="256" height="256">
+<img src="misc/cover.png" alt="Traceable Print" width="410" height="256">
 
 # Traceable Print
 
-[CurseForge](https://www.curseforge.com/minecraft/mc-mods/traceable-print) · [Modrinth](https://modrinth.com/mod/traceable-print)
+[CurseForge](https://www.curseforge.com/minecraft/mc-mods/traceable-print) · [Modrinth](https://modrinth.com/mod/traceable-print) · [MCMOD.cn](https://www.mcmod.cn/class/31390.html)
 
 [简体中文](README_cn.md) | English
 
