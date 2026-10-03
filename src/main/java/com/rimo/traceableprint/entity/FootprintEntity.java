@@ -84,10 +84,23 @@ public class FootprintEntity extends Entity {
 	// 支撑探测深度：从脚印实体位置正下方向下探测支撑方块的深度（供存续检测用）。
 	private static final double SUPPORT_PROBE_DEPTH = 0.2;
 
+	// 服务端自检（过期 + 存续）的时间窗口（tick），也是 checkPhase 的模数：
+	// 一个脚印每 CHECK_INTERVAL_TICKS tick 被检查一次；N 个脚印按 UUID 派生 phase 均匀摄开，
+	// 均每 tick 约 N/CHECK_INTERVAL_TICKS 个跑检查体。旧写法过期 20/存续 10 已含 2 拾频差异，
+	// 统一为 20 既符合 “每秒一次足够”的直觉，也与错相叠加后把每 tick 峰值开销控制到约 1/20。
+	private static final int CHECK_INTERVAL_TICKS = 20;
+
 	// 被追踪提示的节流窗口（tick）：同一链尾脚印在此期间重复被点击只提示一次，防刷。
 	private static final int TRACE_NOTIFY_COOLDOWN_TICKS = 60;
 	// 下次允许提示的绝对游戏时间（仅服务端使用，无需同步/持久化）。
 	private long traceNotifyReadyTime = 0L;
+
+	// 自检相位（0~19）：从 UUID 派生，把不同脚印的服务端自检（过期/存续）均匀错开到 20 tick 窗口内，
+	// 消除 “所有脚印同一 tick 批量查方块” 的峰值突发。选 UUID 而非 Random 有三点考虑：
+	// 1) 零额外分配与调用（一次 long 取模 vs RandomSource.nextInt）；
+	// 2) 世界重载相位稳定（同一实体同一 UUID → 同一 phase），不需要落 NBT；
+	// 3) 与 super.tick() 每 tick 开销相比，比较常量换成读一个 final int 字段完全在噪声以下。
+	private final int checkPhase = (int) Math.floorMod(this.getUUID().getLeastSignificantBits(), CHECK_INTERVAL_TICKS);
 
 	// - - - 方向指示粒子（纯客户端视觉，由被点击的脚印发射） - - -
 	// 喷发间隔（tick）：点击即时放出首颗，其后每秒四颗（每 5 tick 一颗），持续整个高亮时长
@@ -518,22 +531,29 @@ public class FootprintEntity extends Entity {
 			this.tickDirectionIndicator((ClientLevel) this.level());
 			return;
 		}
-		// 服务端：过期自毁（每秒一次）——超时即销毁，无需检查方块，省开销
+		// 服务端：按 phase 到点自检（过期自毁 + 存续检测），两个检查共用同一时间窗口省一次取模。
+		// 【为什么错相位】旧写法 tickCount % 10 / 20 == 0 会让世界内所有脚印在同 tick 集中调
+		// getBlockState/getCollisionShape，形成规律性峰值 tick；按 UUID 派生 phase 摊平后，每 tick 只有约
+		// N/CHECK_INTERVAL 个脚印被查，峰值时长线性下降。总检查次数不变（频率从 10→20 才真的降总量）。
+		// 【为什么加 tickCount==0 兜底】错相后新生脚印可能要到下一 tick 边界才第一次自检；若一出生脚下就是空气
+		// / 被完整方块埋住（极端边界），需要立刻销毁以免穿模渲染。tickCount==0 只跑一次，成本可忽略。
+		if (this.tickCount == 0 || this.tickCount % CHECK_INTERVAL_TICKS != this.checkPhase) {
+			return;
+		}
 		// 兜底补写：仅当播种路径未生效（GEN_TIME 仍为默认 0）时写入，不依赖 tickCount 首帧时序
 		if (this.getGenTime() <= 0) {
 			long now = this.level().getLevelData().getGameTime();
 			this.entityData.set(GEN_TIME, this.pendingGenTime != null ? this.pendingGenTime : now);
 			this.pendingGenTime = null;
 		}
-		if (this.tickCount % 20 == 0) {
-			long now = this.level().getLevelData().getGameTime();
-			if (now > this.getGenTime() + Common.CONFIG.getFootprintLifetimeTicks()) {
-				this.discard();
-				return;
-			}
+		// 过期自毁：与存续检测共用 phase 窗口，超时即 discard，无需检查方块
+		long now = this.level().getLevelData().getGameTime();
+		if (now > this.getGenTime() + Common.CONFIG.getFootprintLifetimeTicks()) {
+			this.discard();
+			return;
 		}
-		// 服务端：存续检测（低频）——脚下失去支撑或被完整方块覆盖时销毁自身
-		if (this.tickCount % 10 == 0 && !isFootprintValid(this.level(), this.getX(), this.getY(), this.getZ())) {
+		// 存续检测：脚下失去支撑或被完整方块覆盖时销毁自身
+		if (!isFootprintValid(this.level(), this.getX(), this.getY(), this.getZ())) {
 			this.discard();
 		}
 	}

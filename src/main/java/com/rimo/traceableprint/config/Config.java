@@ -2,19 +2,26 @@ package com.rimo.traceableprint.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
 import com.rimo.traceableprint.Common;
 import com.rimo.traceableprint.PlatformUtil;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -23,6 +30,12 @@ import java.util.Set;
  * 由 Common.CONFIG 暴露单例，其它模块经 Common.CONFIG.getXxx() 读取。
  * 读写经 Gson 序列化到写死路径 {@code Platform.PLATFORM.getConfigFolder()/traceableprint.json}：{@link #load()} 于构造单例时调用，
  * {@link #save()} 供配置变更后落盘。集合字段非 final，便于 Gson 直接反序列化填充。
+ *
+ * <p><b>逐生物覆写表的主字段是 Map</b>（{@code sideOffsetMap / forwardOffsetMap / sizeMap / blockHeightMap / textureMap}），
+ * 而不是历史上的 {@code List<String>} 字符串条目表：单一数据源、无缓存失效、查询天然 O(1)。
+ * ConfigScreen 一侧仍按 {@code List<String>}（"id,value" 形态）读写：{@code setXxxList}/{@code getXxxList}
+ * 保留原签名，内部经 {@link #parseFloatMap} / {@link #parseTextureMap} 与 {@link #formatFloatMap} / {@link #formatTextureMap} 转手。
+ * 磁盘上老配置（"sizeList": ["id,val",...]）会在 {@link #load()} / {@link #applyJson} 里一次性迁移到 Map 形态（{@link #migrateLegacy}）。
  */
 public class Config {
 	// - - - - 默认值 - - - -
@@ -61,6 +74,7 @@ public class Config {
 	private Set<String> entityList = new HashSet<>();
 
 	// - - - 逐生物偏移初始值（复刻参考工程 FootprintParticle）- - -
+	// 常量保留 List<String> 形态：一是可读性（一行一 id）；二是 ConfigScreen 的「重置」按钮 setDefaultValue 需要 List。
 	// horseLikeMobs→前后（前进方向）偏移：无 float 的条目取参考中“命中但无幅度”的默认 0.75，已带 float 的保留原值。
 	public static final List<String> DEF_FORWARD_OFFSET_LIKE = Arrays.asList(
 			"minecraft:horse,0.75",
@@ -82,7 +96,9 @@ public class Config {
 			"minecraft:iron_golem,0.3",
 			"minecraft:ravager,0.3"
 	);
-	// sizePerMob→脚印贴图缩放倍率（复刻参考工程 DEF_SIZE）：命中条目的 float 连乘，另叠加幼体 0.66 与实体自身 getScale()。
+	// sizePerMob→脚印贴图缩放倍率（复刻参考工程 DEF_SIZE）：命中条目直接给 float，另叠加幼体 0.66 与实体自身 getScale()。
+	// 注：Map 主字段化后每个 id 只保留一个 float（同 id 后写覆盖先写），不再像旧 List 那样支持"重复写同 id 连乘"——
+	// 需要连乘效果请直接把最终倍率写到一个条目里，语义更直观。
 	public static final List<String> DEF_SIZE_PER_MOB = Arrays.asList(
 			"minecraft:chicken,0.6",
 			"minecraft:pig,0.8",
@@ -99,7 +115,8 @@ public class Config {
 			"minecraft:armadillo,0.7"
 	);
 	// blockHeight→脚印在特定方块上生成时的额外 Y 抬升（复刻参考工程 DEF_BLOCKHEIGHT）：雪层/灵魂沙/泥等视觉高度与碰撞箱不符、
-	// 实体踩上去会下沉，脚印需相应抬高以免被非完整方块遮挡。支持 "namespace:path" 与 "#namespace:tag" 两种写法。
+	// 实体踩上去会下沉，脚印需相应抬高以免被非完整方块遮挡。Map 主字段化后 key 支持 "namespace:path" 与 "#namespace:tag" 两种写法，
+	// 查询按「精确 id 优先，标签兜底」短路（与 applyBlocks/isListedEntity 同一套优先级）。
 	public static final List<String> DEF_BLOCK_HEIGHT = Arrays.asList(
 			"minecraft:snow,0.125",
 			"minecraft:soul_sand,0.125",
@@ -112,21 +129,22 @@ public class Config {
 			"mod_id:mob_id,textureName1,textureName2"
 	);
 
-	// 默认值列表以下列 public 常量形式暴露，供配置界面的“重置”按钮作 setDefaultValue 使用。
-	// 逐生物左右偏移覆写表：条目格式 "modid:mobid,float"（如 "minecraft:zombie,0.3"），命中实体注册名则用该 float 幅度。
-	// 内部存为可编辑的 List<String>（供 ClothConfig 等配置库直接展示/编辑）；只按 namespace:path 精确匹配，不支持标签。
-	private List<String> sideOffsetList = new ArrayList<>(DEF_SIDE_OFFSET_LIKE);
-	// 逐生物前后偏移覆写表：条目格式同 "modid:mobid,float"，命中则用该 float 沿前进方向的幅度。
-	private List<String> forwardOffsetList = new ArrayList<>(DEF_FORWARD_OFFSET_LIKE);
-	// 逐生物脚印贴图缩放表：条目格式同 "modid:mobid,float"，仅缩放脚印贴图（不改实体碰撞箱）；只按 namespace:path 精确匹配。
-	private List<String> sizeList = new ArrayList<>(DEF_SIZE_PER_MOB);
-	// 方块额外抬高表：条目格式 "blockid,float" 或 "#tagid,float"，脚印落脚方块命中时对其 Y 叠加 float 抬升。
-	private List<String> blockHeightList = new ArrayList<>(DEF_BLOCK_HEIGHT);
-	// 逐生物脚印贴图覆写表：条目格式 "modid:mobid,textureName1,textureName2,..."——首个逗号前是实体注册名，
-	// 其后是候选贴图名，服务端生成脚印时随机取一个并同步给客户端；命中不到（或列表为空）就用默认 footprint.png。
-	// 贴图名默认相对本模组资源目录（{@code traceableprint:textures/entity/<名字>.png}），也可写完整 "namespace:path"
-	// 让整合包作者把贴图放在自己的命名空间下；名字→Identifier 的组装与资源包存在性校验在客户端 FootprintTextures。
-	private List<String> textureList = new ArrayList<>(DEF_TEXTURE_LIST);
+	// - - - - - 逐生物覆写表：Map 主字段（Gson 直接序列化到 json，无索引、无失效） - - - - -
+	// 一律 LinkedHashMap：保留 JSON 里的书写顺序，也保留默认常量的顺序，写回磁盘时 diff 稳定；查询仍是 O(1)。
+	// 声明顺序在 DEF_* 常量之后，静态初始化时能拿到已就绪的默认常量。
+
+	/** entityId -> 左右偏移幅度（可正可负，调用方取绝对值再随机符号）；float 非法的老条目在迁移期就被丢弃 */
+	private Map<String, Float> sideOffsetMap = parseFloatMap(DEF_SIDE_OFFSET_LIKE);
+	/** entityId -> 前后偏移幅度；语义同 {@link #sideOffsetMap} */
+	private Map<String, Float> forwardOffsetMap = parseFloatMap(DEF_FORWARD_OFFSET_LIKE);
+	/** entityId -> 贴图缩放倍率（同 id 后写覆盖先写，不再连乘）；幼体 0.66 与 getScale() 由调用方另乘 */
+	private Map<String, Float> sizeMap = parseFloatMap(DEF_SIZE_PER_MOB);
+	/** 落脚方块 -> 额外 Y 抬升：key 可以是精确 id "namespace:path" 或标签 "#namespace:tag"；查询走「id 优先、标签兜底」 */
+	private Map<String, Float> blockHeightMap = parseFloatMap(DEF_BLOCK_HEIGHT);
+	/** entityId -> 候选贴图名列表；一个 id 一行，多个候选用逗号并置（旧 List 里"多行同 id 聚合"的写法由迁移一次性合并） */
+	private Map<String, List<String>> textureMap = parseTextureMap(DEF_TEXTURE_LIST);
+
+	// - - - - - 标量项 getter/setter - - - - -
 
 	public long getFootprintLifetimeTicks() {
 		return footprintLifetimeTicks;
@@ -156,7 +174,7 @@ public class Config {
 		this.highlightTicks = Math.max(1, ticks);
 	}
 
-	/** 脚印抬高量，单位为百分之一方块（渲染/生成侧除以 100 使用） */
+	/** 脚印抬高量，单位为方块，与脚印 Y 直接相加 */
 	public float getFootprintYOffset() {
 		return footprintYOffset;
 	}
@@ -164,7 +182,7 @@ public class Config {
 		this.footprintYOffset = offset;
 	}
 
-	/** 脚印贴图默认尺寸（方块，正方形边长）：默认 5/16 匹配原版像素大小；逐生物缩放表（sizeList）与实体 getScale() 在此基准上再乘 */
+	/** 脚印贴图默认尺寸（方块，正方形边长）：默认 5/16 匹配原版像素大小；逐生物缩放表（sizeMap）与实体 getScale() 在此基准上再乘 */
 	public float getFootprintTextureSize() {
 		return footprintTextureSize;
 	}
@@ -250,12 +268,26 @@ public class Config {
 		}
 	}
 
+	// - - - - - Set 主字段：applyBlocks / entityList（ConfigScreen 走 List<String> 视图） - - - - -
+
 	public void setApplyBlocks(List<String> blocks) {
 		applyBlocks.clear();
 		applyBlocks.addAll(blocks);
 	}
 	public List<String> getApplyBlocks() {
 		return applyBlocks.stream().toList();
+	}
+	/**
+	 * 方块白名单成员判定（直接内部 HashSet O(1)）：入参可以是精确 id "namespace:path"，
+	 * 也可以是标签字面串 "#namespace:tag"——两种写法在同一集合里混存，无需区分。
+	 * mixin 侧标签查询逐次传入 "#" + tag.location() 即可同样走 O(1)。
+	 */
+	public boolean isInApplyBlocks(String blockId) {
+		return applyBlocks.contains(blockId);
+	}
+	/** 白名单是否为空：与 {@link #isInApplyBlocks} 拆开提供，方便调用方在取 Holder 前先廉价短路。 */
+	public boolean hasAnyApplyBlockEntries() {
+		return !applyBlocks.isEmpty();
 	}
 
 	public void setEntityList(List<String> entities) {
@@ -266,55 +298,75 @@ public class Config {
 	public List<String> getEntityList() {
 		return entityList.stream().toList();
 	}
+	/**
+	 * 生物名单成员判定（直接内部 HashSet O(1)）：入参可以是精确 id，也可以是 "#namespace:tag" 标签字面串，
+	 * 两种写法混存在同一集合里。语义同 {@link #isInApplyBlocks(String)}。
+	 */
+	public boolean isInEntityList(String entityId) {
+		return entityList.contains(entityId);
+	}
+	/** 生物名单是否为空：供调用方在取注册表 Holder 前先廉价短路。 */
+	public boolean hasAnyEntityEntries() {
+		return !entityList.isEmpty();
+	}
+
+	// - - - - - Map 主字段的 ConfigScreen 视图对（List<String> "id,val" 形态 <-> 内部 Map） - - - - -
 
 	/**
-	 * 逐生物左右偏移覆写表（条目 "modid:mobid,float"）：供配置库展示/编辑，getter 返回不可变副本。
+	 * 逐生物左右偏移表（"modid:mobid,float"）：setter 把 List 解析进 {@link #sideOffsetMap}，getter 把 Map 展回 List 视图。
+	 * 同一 id 重复出现时按「后写覆盖」处理（Map put 语义）；float 非法的条目直接丢弃。
 	 */
 	public void setSideOffsetList(List<String> entries) {
-		sideOffsetList.clear();
-		sideOffsetList.addAll(entries);
+		this.sideOffsetMap = parseFloatMap(entries);
 	}
 	public List<String> getSideOffsetList() {
-		return List.copyOf(sideOffsetList);
+		return formatFloatMap(sideOffsetMap);
 	}
 
-	/** 逐生物前后偏移覆写表（条目 "modid:mobid,float"）：供配置库展示/编辑，getter 返回不可变副本。 */
+	/** 逐生物前后偏移表；语义同 {@link #setSideOffsetList(List)} / {@link #getSideOffsetList()}。 */
 	public void setForwardOffsetList(List<String> entries) {
-		forwardOffsetList.clear();
-		forwardOffsetList.addAll(entries);
+		this.forwardOffsetMap = parseFloatMap(entries);
 	}
 	public List<String> getForwardOffsetList() {
-		return List.copyOf(forwardOffsetList);
+		return formatFloatMap(forwardOffsetMap);
 	}
 
-	/**
-	 * 逐生物脚印贴图缩放表（条目 "modid:mobid,float"）：供配置库展示/编辑，getter 返回不可变副本。
-	 */
+	/** 逐生物贴图缩放表；语义同 {@link #setSideOffsetList(List)}（同 id 覆盖，不再连乘）。 */
 	public void setSizeList(List<String> entries) {
-		sizeList.clear();
-		sizeList.addAll(entries);
+		this.sizeMap = parseFloatMap(entries);
 	}
 	public List<String> getSizeList() {
-		return List.copyOf(sizeList);
+		return formatFloatMap(sizeMap);
 	}
 
 	/**
-	 * 方块额外抬高表（条目 "blockid,float" 或 "#tagid,float"）：供配置库展示/编辑，getter 返回不可变副本。
-	 * 命中逻辑（同时支持 id 与标签）在服务端生成侧（LivingEntityMixin）根据落脚方块查询。
+	 * 方块额外抬高表（"blockid,float" 或 "#tagid,float"）：Map 主字段化后 key 直接支持两种写法混存，
+	 * 查询规则「精确 id 优先、标签兜底」（见 LivingEntityMixin#traceableprint$blockHeightOffset）。
 	 */
 	public void setBlockHeightList(List<String> entries) {
-		blockHeightList.clear();
-		blockHeightList.addAll(entries);
+		this.blockHeightMap = parseFloatMap(entries);
 	}
 	public List<String> getBlockHeightList() {
-		return List.copyOf(blockHeightList);
+		return formatFloatMap(blockHeightMap);
+	}
+	/**
+	 * 方块抬高值查询：key 是精确 id "namespace:path" 或标签 "#namespace:tag"，两者混存在同一 Map 里；
+	 * 直接 O(1) 命中，未命中返回 null。调用方（LivingEntityMixin）先查 id、miss 再逐标签查。
+	 */
+	public Float blockHeightValue(String key) {
+		return key == null ? null : blockHeightMap.get(key);
+	}
+	/** 抬高表是否为空：供调用方在取 Holder 前先廉价短路。 */
+	public boolean hasAnyBlockHeights() {
+		return !blockHeightMap.isEmpty();
 	}
 
 	/**
-	 * 逐生物脚印贴图覆写表（条目 "modid:mobid,texture1,texture2,..."）：供配置库展示/编辑，getter 返回不可变副本。
+	 * 逐生物贴图覆写表（"modid:mobid,texture1,texture2,..."）：Map 主字段是 {@code entityId -> List<String>}，
+	 * ConfigScreen 视图按「一行一 id、候选逗号并置」展平。
 	 *
 	 * <p>【接入配置界面时，本项 tooltip 必须包含以下要点，不能只写“自定义脚印贴图”】
-	 * 候选贴图是「服务端」从它自己那份 textureList 里抽的，抽完把名字同步下来，所以多人游戏下服务端优先：
+	 * 候选贴图是「服务端」从它自己那份 textureMap 里抽的，抽完把名字同步下来，所以多人游戏下服务端优先：
 	 * 与客户端不一致时，客户端这份列表完全不参与选取（既盖不了服务端选定的图，也补不上服务端没配的生物），
 	 * 客户端唯一保留的话语权是资源存在性——同步来的贴图名在本机资源包里找不到时，退回默认 footprint.png。
 	 * 单人与自己的内嵌服读的是同一个 json，不存在差异（别把上面这句写成“客户端配置无用”以免误导单人玩家）。
@@ -323,82 +375,177 @@ public class Config {
 	 * 本机列表不参与选取（仅当同步来的贴图在本机资源包里找不到时退回默认 footprint.png）。」
 	 */
 	public void setTextureList(List<String> entries) {
-		textureList.clear();
-		textureList.addAll(entries);
+		this.textureMap = parseTextureMap(entries);
 	}
 	public List<String> getTextureList() {
-		return List.copyOf(textureList);
+		return formatTextureMap(textureMap);
 	}
 
+	// - - - - - 热路径查询：直接走 Map（O(1)），无索引/无失效 - - - - -
+
 	/**
-	 * 收集实体注册名（namespace:path）在贴图覆写表中的全部候选贴图名：把每个命中条目首个逗号之后的各段
-	 * （去空白、跳过空段）合并成一个候选池，因此同一生物可以写多行来扩充候选。未命中返回空列表，
-	 * 由调用方回退默认贴图。只按 id 精确匹配，不匹配标签。
+	 * 收集实体注册名（namespace:path）在贴图覆写表中的全部候选贴图名：{@code textureMap.get(entityId)} 一次哈希即得。
+	 * 未命中返回空列表，由调用方回退默认贴图。只按 id 精确匹配，不匹配标签。
 	 * 本方法只在生成侧（服务端）被查一次；客户端拿到名字后不再二查本表（服务端优先的利弊见 getTextureList 说明）。
 	 */
 	public List<String> resolveTextureCandidates(String entityId) {
-		if (entityId == null || textureList.isEmpty()) return List.of();
-		List<String> candidates = new ArrayList<>();
-		for (String entry : textureList) {
-			int comma = entry.indexOf(',');
-			if (comma < 0) continue;
-			if (!entry.substring(0, comma).trim().equals(entityId)) continue;
-			for (String name : entry.substring(comma + 1).split(",")) {
-				String trimmed = name.trim();
-				if (!trimmed.isEmpty()) candidates.add(trimmed);
-			}
-		}
-		return candidates;
+		if (entityId == null) return List.of();
+		List<String> candidates = textureMap.get(entityId);
+		return candidates == null ? List.of() : List.copyOf(candidates);
 	}
 
 	/**
-	 * 按实体注册名（namespace:path）计算脚印贴图缩放倍率：对齐参考工程 getEntityScale——初始 1，
-	 * 将每个命中条目的 float 连乘（格式非法的 float 跳过），不匹配标签。幼体/实体自身 scale 由调用方另乘。
+	 * 按实体注册名（namespace:path）取脚印贴图缩放倍率：{@code sizeMap.get(entityId)}，未命中返回 1.0F。
+	 * 幼体 0.66 与实体 getScale() 由调用方另乘（见 LivingEntityMixin）。
 	 */
 	public float resolveSizeMultiplier(String entityId) {
-		float scale = 1.0F;
-		if (entityId == null) return scale;
-		for (String entry : sizeList) {
-			int comma = entry.indexOf(',');
-			if (comma < 0) continue;
-			if (!entry.substring(0, comma).trim().equals(entityId)) continue;
-			try {
-				scale *= Float.parseFloat(entry.substring(comma + 1).trim());
-			} catch (NumberFormatException e) {
-				// float 非法：跳过本条目
-			}
-		}
-		return scale;
+		if (entityId == null) return 1.0F;
+		Float v = sizeMap.get(entityId);
+		return v == null ? 1.0F : v;
 	}
 
 	/**
-	 * 在左右偏移表中按实体注册名（namespace:path）查找自定义幅度。
-	 * 命中返回该条目 float（可能为正或负，调用方自行取绝对值再随机符号）；未命中/格式非法返回 null（由调用方回退全局默认）。
-	 * 只按 id 精确匹配，不匹配标签。空表走快通道。
+	 * 在左右偏移表中按实体注册名（namespace:path）查找自定义幅度：{@code sideOffsetMap.get(entityId)}；
+	 * 未命中或 float 非法返回 null（后者在 parse 阶段已丢弃，不会出现在 Map 里）。
+	 * 只按 id 精确匹配，不匹配标签。
 	 */
 	public Float findSideOffset(String entityId) {
-		return matchOffsetEntry(sideOffsetList, entityId);
+		if (entityId == null) return null;
+		return sideOffsetMap.get(entityId);
 	}
 
 	/** 在前后偏移表中按实体注册名（namespace:path）查找自定义幅度；语义同 {@link #findSideOffset(String)}。 */
 	public Float findForwardOffset(String entityId) {
-		return matchOffsetEntry(forwardOffsetList, entityId);
+		if (entityId == null) return null;
+		return forwardOffsetMap.get(entityId);
 	}
 
-	/** 解析 "modid:mobid,float" 条目并与 entityId 精确比对：命中首个条目返回其 float，否则 null。 */
-	private static Float matchOffsetEntry(List<String> list, String entityId) {
-		if (list.isEmpty() || entityId == null) return null;
-		for (String entry : list) {
+	// - - - - - List<String> "id,value" <-> Map 转换（ConfigScreen 视图 & 迁移期共用） - - - - -
+
+	/**
+	 * 解析 "id,float" 形态的条目列表到 LinkedHashMap（保留插入序，diff 稳定）。
+	 * 语义：同 id 后写覆盖先写；float 解析失败或条目不含逗号的都丢弃；空 key 丢弃。
+	 */
+	static Map<String, Float> parseFloatMap(List<String> entries) {
+		Map<String, Float> m = new LinkedHashMap<>();
+		if (entries == null) return m;
+		for (String entry : entries) {
+			if (entry == null) continue;
 			int comma = entry.indexOf(',');
 			if (comma < 0) continue;
-			if (!entry.substring(0, comma).trim().equals(entityId)) continue;
+			String id = entry.substring(0, comma).trim();
+			if (id.isEmpty()) continue;
 			try {
-				return Float.parseFloat(entry.substring(comma + 1).trim());
+				m.put(id, Float.parseFloat(entry.substring(comma + 1).trim()));
 			} catch (NumberFormatException e) {
-				return null; // float 部分非法：视为未命中，回退默认
+				// 非法 float：丢弃（旧版会视作 null/0，新语义统一为「等同于未配置」）
 			}
 		}
-		return null;
+		return m;
+	}
+
+	/**
+	 * 解析 "id,name1,name2,..." 形态的条目列表到 LinkedHashMap。
+	 * 语义：同 id 后写覆盖先写（新配置一行一 id，聚合在旧 List 里靠多行同 id；迁移时 {@link #migrateLegacy} 会显式合并）；
+	 * 首个逗号之后的各段去空白、跳过空段；无候选（全空段）时留空列表，让查询侧自然回退默认贴图。
+	 */
+	static Map<String, List<String>> parseTextureMap(List<String> entries) {
+		Map<String, List<String>> m = new LinkedHashMap<>();
+		if (entries == null) return m;
+		for (String entry : entries) {
+			if (entry == null) continue;
+			int comma = entry.indexOf(',');
+			if (comma < 0) continue;
+			String id = entry.substring(0, comma).trim();
+			if (id.isEmpty()) continue;
+			List<String> list = new ArrayList<>();
+			for (String name : entry.substring(comma + 1).split(",")) {
+				String t = name.trim();
+				if (!t.isEmpty()) list.add(t);
+			}
+			m.put(id, list);
+		}
+		return m;
+	}
+
+	/** 把 Map 展成 "id,value" List 视图给 ConfigScreen；null 值跳过（parseFloatMap 已保证不会有）。 */
+	static List<String> formatFloatMap(Map<String, Float> m) {
+		List<String> out = new ArrayList<>();
+		if (m == null) return out;
+		for (Map.Entry<String, Float> e : m.entrySet()) {
+			if (e.getValue() == null) continue;
+			out.add(e.getKey() + "," + e.getValue());
+		}
+		return out;
+	}
+
+	/** 把 {@code id -> [候选名...]} Map 展成 "id,name1,name2" List 视图；空列表条目输出成 "id," 以便玩家看得见这行存在。 */
+	static List<String> formatTextureMap(Map<String, List<String>> m) {
+		List<String> out = new ArrayList<>();
+		if (m == null) return out;
+		for (Map.Entry<String, List<String>> e : m.entrySet()) {
+			List<String> v = e.getValue();
+			out.add(v == null || v.isEmpty() ? e.getKey() + "," : e.getKey() + "," + String.join(",", v));
+		}
+		return out;
+	}
+
+	// - - - - - 老配置 List<String> 字段的一次性迁移（JsonParser 前置 pass，之后 save 就写出 Map 形态） - - - - -
+
+	/** 老字段名 → 新字段名，float 类 Map 五对（前四对语义相同、textureMap 值形态是字符串数组） */
+	private static final String[][] LEGACY_FLOAT_MAP_FIELDS = {
+			{"sideOffsetList", "sideOffsetMap"},
+			{"forwardOffsetList", "forwardOffsetMap"},
+			{"sizeList", "sizeMap"},
+			{"blockHeightList", "blockHeightMap"},
+	};
+	private static final String[][] LEGACY_TEXTURE_MAP_FIELDS = {
+			{"textureList", "textureMap"},
+	};
+
+	/**
+	 * 若 json 里存在老形态的 {@code List<String>} 字段而对应的新形态 Map 字段缺席，就把老 List 展成新 Map 注入。
+	 * 迁移只在 load / applyJson 读入瞬间发生一次，之后 save 直接落 Map 形态；老字段被 {@code remove} 掉不残留在 json 里。
+	 * 若新老字段同时存在（用户半手动改过 json 或从新客户端上传上来的），保留新字段、丢弃老字段（新字段是权威）。
+	 */
+	private static void migrateLegacy(JsonObject obj) {
+		for (String[] pair : LEGACY_FLOAT_MAP_FIELDS) {
+			migrateField(obj, pair[0], pair[1], /*isTextureMap*/ false);
+		}
+		for (String[] pair : LEGACY_TEXTURE_MAP_FIELDS) {
+			migrateField(obj, pair[0], pair[1], /*isTextureMap*/ true);
+		}
+	}
+
+	private static void migrateField(JsonObject obj, String oldKey, String newKey, boolean isTextureMap) {
+		if (!obj.has(oldKey)) return;
+		JsonElement old = obj.remove(oldKey); // 无论迁移成功与否，老字段都不再进 json
+		if (obj.has(newKey)) return;          // 新字段已存在：以新为准，老字段就地丢弃
+		if (!old.isJsonArray()) return;
+		List<String> entries = new ArrayList<>();
+		for (JsonElement e : old.getAsJsonArray()) {
+			if (e.isJsonPrimitive() && e.getAsJsonPrimitive().isString()) entries.add(e.getAsString());
+		}
+		if (isTextureMap) {
+			// 老 List 支持"多行同 id 聚合"（每行候选合并进同一 id 的候选池）；迁移期显式合并再交给 parseTextureMap
+			Map<String, List<String>> merged = new LinkedHashMap<>();
+			for (String entry : entries) {
+				if (entry == null) continue;
+				int comma = entry.indexOf(',');
+				if (comma < 0) continue;
+				String id = entry.substring(0, comma).trim();
+				if (id.isEmpty()) continue;
+				List<String> bucket = merged.computeIfAbsent(id, k -> new ArrayList<>());
+				for (String name : entry.substring(comma + 1).split(",")) {
+					String t = name.trim();
+					if (!t.isEmpty()) bucket.add(t);
+				}
+			}
+			obj.add(newKey, GSON.toJsonTree(merged));
+		} else {
+			// float 类：直接复用 parseFloatMap（同 id 后写覆盖，非法丢弃）
+			obj.add(newKey, GSON.toJsonTree(parseFloatMap(entries)));
+		}
 	}
 
 	/* - - - - - IO（Gson 序列化，参考 SuperFancyClouds SharedConfig，仅保留 load/save）- - - - - */
@@ -411,16 +558,17 @@ public class Config {
 	 * 从 {@code CONFIG_PATH} 载入并回填到当前实例，返回 {@code this} 以便链式初始化。
 	 * 文件不存在时写入一份默认配置；读取/解析失败则保留当前值（默认）不影响运行。
 	 * Gson 会新建一个 Config 反序列化（未出现的键保持默认值，天然向后兼容新增字段），再复制到本实例。
+	 * 载入前对 json 树跑一次 {@link #migrateLegacy}，把老 List 字段就地改写成新 Map 字段。
 	 */
 	public Config load() {
 		if (Files.exists(CONFIG_PATH)) {
 			try (BufferedReader reader = Files.newBufferedReader(CONFIG_PATH)) {
-				Config loaded = GSON.fromJson(reader, Config.class);
+				Config loaded = parseWithMigration(reader);
 				if (loaded != null) {
 					this.copyFrom(loaded);
 				}
 			} catch (IOException | JsonParseException e) {
-				Common.LOGGER.error("[TraceablePrint] Failed to read config file: {}, using current/default config", CONFIG_PATH, e);
+				Common.LOGGER.error("Failed to read config file: {}, using current/default config", CONFIG_PATH, e);
 			}
 		} else {
 			save();
@@ -436,7 +584,7 @@ public class Config {
 				GSON.toJson(this, writer);
 			}
 		} catch (IOException e) {
-			Common.LOGGER.error("[TraceablePrint] Failed to write config file: {}", CONFIG_PATH, e);
+			Common.LOGGER.error("Failed to write config file: {}", CONFIG_PATH, e);
 		}
 	}
 
@@ -452,25 +600,43 @@ public class Config {
 	 * 解析上传来的 JSON 并回填到当前实例，成功返回 {@code true}。
 	 * 解析失败/空串返回 {@code false} 且不改动现有值（落盘由调用方决定）。
 	 * 注意：Gson 按 {@code name()} 反序列化 {@link WorkMode}；未出现的键保持默认，天然向后兼容。
+	 * 与 {@link #load()} 共用迁移前置：万一客户端版本落后上传了老格式 json，服务端也能识别。
 	 */
 	public boolean applyJson(String json) {
 		if (json == null || json.isEmpty()) {
 			return false;
 		}
 		try {
-			Config parsed = GSON.fromJson(json, Config.class);
+			Config parsed = parseWithMigrationString(json);
 			if (parsed == null) {
 				return false;
 			}
 			this.copyFrom(parsed);
 			return true;
 		} catch (JsonParseException e) {
-			Common.LOGGER.error("[TraceablePrint] Failed to parse uploaded config JSON", e);
+			Common.LOGGER.error("Failed to parse uploaded config JSON", e);
 			return false;
 		}
 	}
 
-	/** 把已反序列化的 {@code src} 各字段值覆写进本实例（集合直接引用其新实例）。 */
+	/** load 与 applyJson 共用的读入前置：把老 List 字段迁移成新 Map 字段，再交给 Gson 反序列化。 */
+	private static Config parseWithMigration(Reader reader) {
+		JsonElement root = JsonParser.parseReader(reader);
+		if (root.isJsonObject()) migrateLegacy(root.getAsJsonObject());
+		return GSON.fromJson(root, Config.class);
+	}
+
+	private static Config parseWithMigrationString(String json) {
+		JsonElement root = JsonParser.parseString(json);
+		if (root.isJsonObject()) migrateLegacy(root.getAsJsonObject());
+		return GSON.fromJson(root, Config.class);
+	}
+
+	/**
+	 * 把已反序列化的 {@code src} 各字段值覆写进本实例。
+	 * 集合字段（Set / Map）直接引用 src 的对象：src 是 load/applyJson 内部的临时反序列化产物，随后即弃，
+	 * 本实例持有其引用不会被外部改动；这也避免了 copy 一遍集合的额外分配。
+	 */
 	private void copyFrom(Config src) {
 		this.footprintLifetimeTicks = src.footprintLifetimeTicks;
 		this.minSpawnDistance = src.minSpawnDistance;
@@ -486,10 +652,22 @@ public class Config {
 		this.enableMod = src.enableMod;
 		this.applyBlocks = src.applyBlocks;
 		this.entityList = src.entityList;
-		this.sideOffsetList = src.sideOffsetList;
-		this.forwardOffsetList = src.forwardOffsetList;
-		this.sizeList = src.sizeList;
-		this.blockHeightList = src.blockHeightList;
-		this.textureList = src.textureList;
+		this.sideOffsetMap = nullSafe(src.sideOffsetMap, Config::parseFloatMapEmpty);
+		this.forwardOffsetMap = nullSafe(src.forwardOffsetMap, Config::parseFloatMapEmpty);
+		this.sizeMap = nullSafe(src.sizeMap, Config::parseFloatMapEmpty);
+		this.blockHeightMap = nullSafe(src.blockHeightMap, Config::parseFloatMapEmpty);
+		this.textureMap = nullSafe(src.textureMap, Config::parseTextureMapEmpty);
+	}
+
+	/** Gson 遇到 json 里没这个键时会把字段留 null（UnsafeAllocator 绕过构造器，不跑 field initializer）；null 兜底给空 Map，后续 setter 直接替换引用即可。 */
+	private static <T> T nullSafe(T v, java.util.function.Supplier<T> fallback) {
+		return v != null ? v : fallback.get();
+	}
+
+	private static Map<String, Float> parseFloatMapEmpty() {
+		return new LinkedHashMap<>();
+	}
+	private static Map<String, List<String>> parseTextureMapEmpty() {
+		return new LinkedHashMap<>();
 	}
 }

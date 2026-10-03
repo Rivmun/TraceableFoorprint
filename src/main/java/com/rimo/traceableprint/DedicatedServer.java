@@ -84,6 +84,9 @@ public class DedicatedServer {
 			VersionUtil.sendSystemMessage(ctx, "Config upload must be run by a player (its config lives on the client).");
 			return 0;
 		}
+		// 入口顺手清扫过期条目：/upload 频率低（自带 3 秒冷却）但两个 map 否则只会涨不会降——
+		// 玩家断线或邀约超时后，其 UUID 会永远留在 map 里，长跑服务端会轻泄漏。
+		pruneExpired();
 		long now = System.currentTimeMillis();
 		Long last = lastUploadByPlayer.get(player.getUUID());
 		if (last != null && now - last < UPLOAD_COOLDOWN_MS) {
@@ -97,6 +100,22 @@ public class DedicatedServer {
 		return 1;
 	}
 
+	/**
+	 * 清理两个 map 里的自然过期条目：
+	 * <ul>
+	 *   <li>{@code pendingByPlayer}：令牌已到期（{@code expiry <= now}）的一律剔除；</li>
+	 *   <li>{@code lastUploadByPlayer}：冷却窗口已完全过去（{@code now - last >= UPLOAD_COOLDOWN_MS}）的一律剔除，
+	 *       反正后续 {@link #upload} 里的判断等价于 {@code last == null}（无冷却）。</li>
+	 * </ul>
+	 * 在 {@link #upload} 与 {@link #handleUploadConfigPayload} 两个入口调用；map 天然小（仅近期使用过 /upload 的玩家），
+	 * 频繁扫描成本可忽。玩家彻底断线且不再回来时，条目最多活 一个 TTL 周期就被下个访问者的入口清扫带走。
+	 */
+	private static void pruneExpired() {
+		long now = System.currentTimeMillis();
+		pendingByPlayer.entrySet().removeIf(e -> e.getValue() <= now);
+		lastUploadByPlayer.entrySet().removeIf(e -> now - e.getValue() >= UPLOAD_COOLDOWN_MS);
+	}
+
 	// - - - - - 服务端：收到配置回传 -> 校验令牌与权限 -> 落盘 - - - - -
 
 	/**
@@ -104,6 +123,8 @@ public class DedicatedServer {
 	 * 仅在「发送方有 op 权限」且「命中未过期邀约令牌」时应用并落盘；权限不足按约定固定语句报错。
 	 */
 	public static void handleUploadConfigPayload(Common.UploadConfigPayload payload, ServerPlayer player) {
+		// 入口清扫：与 /upload 同理，不取不取一个约定“谁先碰到入口就顺手扫一遍”的廉价兼顾位。
+		pruneExpired();
 		//? if <= 1.21.1 {
 		/*if (player.getServer().getProfilePermissions(player.getGameProfile()) < REQUIRED_PERMISSION) {
 		*///? } else {

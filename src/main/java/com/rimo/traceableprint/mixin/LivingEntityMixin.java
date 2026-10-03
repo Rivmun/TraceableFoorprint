@@ -4,11 +4,9 @@ import com.rimo.traceableprint.Common;
 import com.rimo.traceableprint.config.Config;
 import com.rimo.traceableprint.entity.FootprintEntity;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Holder;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.tags.TagKey;
 import net.minecraft.util.Mth;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EntityType;
@@ -313,78 +311,59 @@ public abstract class LivingEntityMixin {
 	}
 
 	/**
-	 * 查方块额外抬高表（blockHeightList）：命中返回该条目 float，未命中/非法返回 0。
-	 * 条目支持 "namespace:path" 精确匹配与 "#namespace:tag" 标签匹配两种写法，首个命中即生效。
+	 * 查方块额外抬高表（Config.blockHeightMap，主字段即 Map）：O(1) 命中。
+	 * 优先级——精确 id 命中 > 任何 #tag 命中（与 isBlockAllowed / isListedEntity 同一套 “id 优先短路”规则）；
+	 * 同 id 与多个 tag 都命中时取 id；多个 tag 都命中时按 MC 提供的 tags() 流序首个胜出。
 	 */
 	@Unique
 	private static double traceableprint$blockHeightOffset(ServerLevel world, BlockPos pos) {
-		List<String> list = Common.CONFIG.getBlockHeightList();
-		if (list.isEmpty()) return 0.0;
+		if (!Common.CONFIG.hasAnyBlockHeights()) return 0.0;
 		BlockState block = world.getBlockState(pos);
 		String id = BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString();
-		for (String entry : list) {
-			int comma = entry.indexOf(',');
-			if (comma < 0) continue;
-			String key = entry.substring(0, comma).trim();
-			boolean match;
-			if (key.startsWith("#")) {
-				match = false;
-				//~ if >= 26.1 'block.getBlockHolder()' -> 'block.typeHolder()'
-				for (TagKey<Block> tag : block.typeHolder().tags().toList()) {
-					if (key.equals("#" + tag.location())) { match = true; break; }
-				}
-			} else {
-				match = key.equals(id);
-			}
-			if (match) {
-				try {
-					return Double.parseDouble(entry.substring(comma + 1).trim());
-				} catch (NumberFormatException e) {
-					return 0.0; // float 部分非法：不抬高
-				}
-			}
-		}
-		return 0.0;
+		Float direct = Common.CONFIG.blockHeightValue(id);
+		if (direct != null) return direct;
+		//~ if >= 26.1 'block.getBlockHolder()' -> 'block.typeHolder()'
+		Float viaTag = block.typeHolder().tags()
+				.map(t -> Common.CONFIG.blockHeightValue("#" + t.location()))
+				.filter(java.util.Objects::nonNull)
+				.findFirst()
+				.orElse(null);
+		return viaTag == null ? 0.0 : viaTag;
 	}
 
 	/**
 	 * 生物名单命中判定（与方块白名单同构）：实体类型ID "namespace:path" 或 "#namespace:tag" 标签任一命中即为命中。
 	 * 本方法只回答“在不在名单里”，黑名单/白名单语义由 Config.isEntityListInverted() 决定。
 	 * 标签走 typeHolder().tags()（与方块的 state.typeHolder().tags() 同一套机制，可写 #minecraft:undead 这类分组）。
+	 *【热路径优化】精确 id 与标签都走 Config 内部的 HashSet.contains（O(1)）：名单里 id 与 "#tag" 混存，
+	 * 同一集合能直接满足两种写法；.tags().anyMatch(...) 对 Stream 短路，避免中间 List。
 	 */
 	@Unique
 	private static boolean traceableprint$isListedEntity(LivingEntity parent) {
-		List<String> list = Common.CONFIG.getEntityList();
-		if (list.isEmpty()) return false; // 空名单快通道：免做注册表查表与标签遍历
-		if (list.contains(BuiltInRegistries.ENTITY_TYPE.getKey(parent.getType()).toString())) return true;
-		//~ if >= 26.1 'parent.getType().builtInRegistryHolder()' -> 'parent.typeHolder()'
-		for (TagKey<EntityType<?>> tag : parent.typeHolder().tags().toList()) {
-			if (list.contains("#" + tag.location())) {
-				return true;
-			}
+		if (Common.CONFIG.isInEntityList(BuiltInRegistries.ENTITY_TYPE.getKey(parent.getType()).toString())) {
+			return true;
 		}
-		return false;
+		// 空名单短路：不取 Holder、不遍历标签
+		if (!Common.CONFIG.hasAnyEntityEntries()) return false;
+		//~ if >= 26.1 'parent.getType().builtInRegistryHolder()' -> 'parent.typeHolder()'
+		return parent.typeHolder().tags().anyMatch(
+				tag -> Common.CONFIG.isInEntityList("#" + tag.location()));
 	}
 
 	/**
 	 * 方块允许判定：白名单(支持 "#tag") 优先；其后硬度门槛 |defaultDestroyTime| < gate。
+	 *【热路径优化】精确 id 与标签都走 Config 内部 HashSet.contains（O(1)）；applyBlocks 为空时干脆不取 Holder；
+	 * .tags().anyMatch(...) 对 Stream 短路，避免中间 List。
 	 */
 	@Unique
 	private static boolean traceableprint$isBlockAllowed(ServerLevel world, BlockPos pos) {
 		BlockState block = world.getBlockState(pos);
 		String id = BuiltInRegistries.BLOCK.getKey(block.getBlock()).toString();
-		//~ if >= 26.1 'block.getBlockHolder()' -> 'block.typeHolder()'
-		Holder<Block> holder = block.typeHolder();
-		List<String> apply = Common.CONFIG.getApplyBlocks();
-
-		boolean canGen = apply.contains(id);
-		if (!canGen) {
-			for (TagKey<Block> tag : holder.tags().toList()) {
-				if (apply.contains("#" + tag.location())) {
-					canGen = true;
-					break;
-				}
-			}
+		boolean canGen = Common.CONFIG.isInApplyBlocks(id);
+		if (!canGen && Common.CONFIG.hasAnyApplyBlockEntries()) {
+			//~ if >= 26.1 'block.getBlockHolder()' -> 'block.typeHolder()'
+			canGen = block.typeHolder().tags().anyMatch(
+					tag -> Common.CONFIG.isInApplyBlocks("#" + tag.location()));
 		}
 		if (!canGen) {
 			float gate = Common.CONFIG.getHardnessGate();
