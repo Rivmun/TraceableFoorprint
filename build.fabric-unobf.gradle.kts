@@ -66,11 +66,11 @@ dependencies {
 
 tasks {
     processResources {
-        // 只排除 named 版 AW（与本 unobf 构建无关），保留 traceableprint.unobf.accesswidener 随包发布，
-        // 供 Fabric 运行期按 fabric.mod.json 的 accessWidener 字段加载（loom-no-remap 不会自动回注）。
-        exclude("**/neoforge.mods.toml", "**/mods.toml", "**/${project.property("mod.id")}.accesswidener")
-        // 26.x 走新版 RenderPipeline + footprint_pulse；剔除仅供 <=1.21.1 的 footprint_legacy。
-        exclude("**/footprint_legacy.*")
+        // 排除与本 unobf 构建无关的 AW（保留 traceableprint.unobf.accesswidener）。
+        val id = project.property("mod.id") as String
+        exclude("**/neoforge.mods.toml", "**/mods.toml", "**/${id}.accesswidener", "**/${id}.legacy.accesswidener")
+        // 26.x 走新版 RenderPipeline + footprint_pulse；剔除整个 minecraft 覆盖命名空间（含空目录条目）。
+        exclude("assets/minecraft/**")
     }
 }
 

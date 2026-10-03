@@ -1,16 +1,12 @@
 //? if neoforge {
 /*package com.rimo.traceableprint.loaders.neoforge;
 
-import com.rimo.traceableprint.Client;
-import com.rimo.traceableprint.Common;
-import com.rimo.traceableprint.DedicatedServer;
-import com.rimo.traceableprint.VersionUtil;
+import com.rimo.traceableprint.*;
 import com.rimo.traceableprint.config.ConfigScreen;
 import com.rimo.traceableprint.config.MissingDependencyScreen;
 import com.rimo.traceableprint.entity.FootprintEntityRenderer;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
@@ -37,6 +33,37 @@ import java.nio.file.Path;
 @Mod(Common.MOD_ID)
 @EventBusSubscriber(modid = Common.MOD_ID)
 public class Platform {
+	// 类加载时把本加载器实现注册进公共接口单例（@Mod 实例化先于任何事件/注册），供公共部分经 PlatformUtil.PLATFORM 调用。
+	static {
+		PlatformUtil.PLATFORM = new PlatformUtil.IPlatform() {
+			@Override
+			public boolean isClothConfigLoaded() {
+				return ModList.get().isLoaded("cloth_config");
+			}
+
+			@Override
+			public Path getConfigFolder() {
+				return FMLPaths.CONFIGDIR.get();
+			}
+
+			@Override
+			public void sendUploadRequest(ServerPlayer player) {
+				PacketDistributor.sendToPlayer(player, new Common.UploadRequestPayload());
+			}
+
+			@Override
+			@OnlyIn(Dist.CLIENT)
+			public void sendUploadConfig(String json) {
+				Common.UploadConfigPayload payload = new Common.UploadConfigPayload(json);
+				//? if <= 1.21.1 {
+				/^PacketDistributor.sendToServer(payload); // 1.21.1（NeoForge 21.1）无 ClientPacketDistributor，sendToServer 仍在 PacketDistributor 上
+				^///? } else {
+				ClientPacketDistributor.sendToServer(payload);
+				//? }
+			}
+		};
+	}
+
 	@SubscribeEvent
 	public static void init(FMLCommonSetupEvent event) {
 		Common.init();
@@ -63,7 +90,7 @@ public class Platform {
 			// ConfigScreen 的引用只发生在「已装 cloth」分支，配合 JVM 按需类加载，cloth 缺席时该类不会被解析。
 			ModList.get().getModContainerById(Common.MOD_ID).ifPresent(container ->
 					container.registerExtensionPoint(IConfigScreenFactory.class, (modContainer, parentScreen) ->
-							isModLoaded("cloth_config")
+						ModList.get().isLoaded("cloth_config")
 									? ConfigScreen.create(parentScreen)
 									: new MissingDependencyScreen(parentScreen))
 			);
@@ -96,31 +123,6 @@ public class Platform {
 		public static void init(FMLDedicatedServerSetupEvent event) {
 			DedicatedServer.init();
 		}
-	}
-
-	// - - - - - Platform specific function - - - - -
-	public static boolean canReceive(ServerPlayer player, CustomPacketPayload.Type<?> type) {
-		return player.connection.hasChannel(type);
-	}
-	public static void sendToPlayer(ServerPlayer player, CustomPacketPayload payload) {
-		PacketDistributor.sendToPlayer(player, payload);
-	}
-	@OnlyIn(Dist.CLIENT)
-	public static void sendToServer(CustomPacketPayload payload) {
-		//? if <= 1.21.1 {
-		/^PacketDistributor.sendToServer(payload); // 1.21.1（NeoForge 21.1）无 ClientPacketDistributor，sendToServer 仍在 PacketDistributor 上
-		^///? } else {
-		ClientPacketDistributor.sendToServer(payload);
-		//? }
-	}
-	public static boolean isModLoaded(String id) {
-		return ModList.get().isLoaded(id);
-	}
-	public static Path getConfigFolder() {
-		return FMLPaths.CONFIGDIR.get();
-	}
-	public static boolean isFabric() {
-		return false;
 	}
 }
 *///? }

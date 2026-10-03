@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       mc_versions:
-        description: 'input subproject name'
+        description: 'MC versions (mergeable: 26.1,26.2,26.3; per-loader: 1.21.11,1.21.1,1.20.1)'
         required: true
         type: string
-        default: '26.3-fabric,26.3-neoforge,26.2-fabric,26.2-neoforge,26.1-fabric,26.1-neoforge,1.21.11-fabric,1.21.11-neoforge,1.21.1-fabric,1.21.1-neoforge,1.20.1-fabric,1.20.1-forge'
+        default: '26.3'
 
 jobs:
   prepare-matrix:
@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        version: ${{ fromJson(needs.prepare-matrix.outputs.versions) }}
+        mc: ${{ fromJson(needs.prepare-matrix.outputs.versions) }}
       fail-fast: false
     steps:
       - name: Checkout Repository
@@ -48,25 +48,29 @@ jobs:
 
       - run: chmod +x gradlew
 
-      - name: Get version from gradle.properties
+      - name: Get mod version from stonecutter.properties.toml
         id: get_version
         run: |
-          VERSION=$(grep "^mod.version=" gradle.properties | cut -d'=' -f2)
+          VERSION=$(grep "^mod.version=" stonecutter.properties.toml | head -1 | cut -d'=' -f2 | tr -d '"')
           if [ -z "$VERSION" ]; then
-            VERSION=$(grep "^mod_version=" gradle.properties | cut -d'=' -f2)
-          fi
-          if [ -z "$VERSION" ]; then
-            VERSION=$(grep "^version=" gradle.properties | cut -d'=' -f2)
-          fi
-          if [ -z "$VERSION" ]; then
-            echo "Version not found in gradle.properties"
+            echo "mod.version not found in stonecutter.properties.toml"
             exit 1
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Detected version: $VERSION"
+          echo "Detected mod version: $VERSION"
 
-      - name: Build ${{ matrix.version }}
-        run: ./gradlew ${{ matrix.version }}:build --no-daemon
+      # 真实游戏版本号取自子工程 gradle.properties（如 26.1 -> 26.1.2）
+      - name: Resolve real MC version
+        id: mc_version
+        run: |
+          SUB=$(find versions -maxdepth 1 -type d -name "${{ matrix.mc }}-*" | head -1)
+          if [ -z "$SUB" ]; then
+            echo "No subproject found for ${{ matrix.mc }}"
+            exit 1
+          fi
+          REAL_MC=$(grep "^deps.minecraft=" "$SUB/gradle.properties" | cut -d'=' -f2)
+          echo "real_mc=$REAL_MC" >> $GITHUB_OUTPUT
+          echo "Real MC version: $REAL_MC"
 
       - name: Extract Current Version Changelog
         run: |
@@ -75,7 +79,22 @@ jobs:
           echo "prepared changelog："
           cat temp-changelog.md
 
-      - name: Publish to Modrinth & CurseForge
+      # ---------- 判断是否为可合并版本 ----------
+      - name: Check if mergeable
+        id: mergeable
+        run: |
+          case "${{ matrix.mc }}" in
+            26.1|26.2|26.3) echo "is_merged=true" >> $GITHUB_OUTPUT ;;
+            *)              echo "is_merged=false" >> $GITHUB_OUTPUT ;;
+          esac
+
+      # ---------- 无混淆 26.x：Forgix 合并为单个跨 loader 产物 ----------
+      - name: Merge build ${{ matrix.mc }} (forgix)
+        if: steps.mergeable.outputs.is_merged == 'true'
+        run: ./gradlew mergeJars -Pforgix.mc=${{ matrix.mc }} --no-daemon
+
+      - name: Publish merged ${{ matrix.mc }} to Modrinth & CurseForge
+        if: steps.mergeable.outputs.is_merged == 'true'
         uses: Kir-Antipov/mc-publish@v3.3
         with:
           modrinth-id: JS88OZWj
@@ -83,7 +102,34 @@ jobs:
           curseforge-id: 1719285
           curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
           github-enabled: false
-          files: versions/${{ matrix.version }}/build/libs/*.jar
-          name: ${{ steps.get_version.outputs.version }} for ${{ matrix.version }}
-          version: ${{ steps.get_version.outputs.version }}+${{ matrix.version }}
+          files: build/merged/*.jar
+          name: ${{ steps.get_version.outputs.version }} for ${{ matrix.mc }}
+          version: ${{ steps.get_version.outputs.version }}+${{ matrix.mc }}
+          loaders: fabric,neoforge
+          game-versions: ${{ steps.mc_version.outputs.real_mc }}
+          changelog-file: temp-changelog.md
+
+      # ---------- 1.21.x / 1.20.x 仍混淆：每-loader 单独产物 ----------
+      - name: Build ${{ matrix.mc }} per-loader
+        if: steps.mergeable.outputs.is_merged == 'false'
+        run: |
+          for SUB in versions/${{ matrix.mc }}-*; do
+            NAME=$(basename "$SUB")
+            echo "=== Building $NAME ==="
+            ./gradlew "$NAME:build" --no-daemon
+          done
+
+      - name: Publish per-loader ${{ matrix.mc }} to Modrinth & CurseForge
+        if: steps.mergeable.outputs.is_merged == 'false'
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          modrinth-id: JS88OZWj
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          curseforge-id: 1719285
+          curseforge-token: ${{ secrets.CURSEFORGE_TOKEN }}
+          github-enabled: false
+          files: 'versions/${{ matrix.mc }}-*/build/libs/*.jar'
+          name: ${{ steps.get_version.outputs.version }} for ${{ matrix.mc }}
+          version: ${{ steps.get_version.outputs.version }}+${{ matrix.mc }}
+          game-versions: ${{ steps.mc_version.outputs.real_mc }}
           changelog-file: temp-changelog.md

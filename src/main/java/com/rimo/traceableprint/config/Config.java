@@ -4,13 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
 import com.rimo.traceableprint.Common;
-//? if fabric {
-import com.rimo.traceableprint.loaders.fabric.Platform;
-//? } else if neoforge {
-/*import com.rimo.traceableprint.loaders.neoforge.Platform;
-*///? } else if forge {
-/*import com.rimo.traceableprint.loaders.forge.Platform;
-*///? }
+import com.rimo.traceableprint.PlatformUtil;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -27,7 +21,7 @@ import java.util.Set;
  * 模组可调参数（纯 Java，零 loader 依赖，双端共用）。
  *
  * 由 Common.CONFIG 暴露单例，其它模块经 Common.CONFIG.getXxx() 读取。
- * 读写经 Gson 序列化到写死路径 {@code Platform.getConfigFolder()/traceableprint.json}：{@link #load()} 于构造单例时调用，
+ * 读写经 Gson 序列化到写死路径 {@code Platform.PLATFORM.getConfigFolder()/traceableprint.json}：{@link #load()} 于构造单例时调用，
  * {@link #save()} 供配置变更后落盘。集合字段非 final，便于 Gson 直接反序列化填充。
  */
 public class Config {
@@ -411,7 +405,7 @@ public class Config {
 
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	// 配置文件路径在类初始化时写死：{@code config/traceableprint.json}。
-	private static final Path CONFIG_PATH = Platform.getConfigFolder().resolve(Common.MOD_ID + ".json");
+	private static final Path CONFIG_PATH = PlatformUtil.PLATFORM.getConfigFolder().resolve(Common.MOD_ID + ".json");
 
 	/**
 	 * 从 {@code CONFIG_PATH} 载入并回填到当前实例，返回 {@code this} 以便链式初始化。

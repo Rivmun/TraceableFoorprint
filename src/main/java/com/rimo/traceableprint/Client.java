@@ -1,13 +1,6 @@
 package com.rimo.traceableprint;
 
 import com.rimo.traceableprint.config.ConfigScreen;
-//? if fabric {
-import com.rimo.traceableprint.loaders.fabric.Platform;
-//? } else if neoforge {
-/*import com.rimo.traceableprint.loaders.neoforge.Platform;
-*///? } else if forge {
-/*import com.rimo.traceableprint.loaders.forge.Platform;
-*///? }
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
@@ -28,8 +21,7 @@ public class Client {
 	 */
 	public static void openConfigScreen() {
 		Minecraft mc = Minecraft.getInstance();
-		//~ if !fabric 'cloth-config2' -> 'cloth_config'
-		if (!Platform.isModLoaded("cloth-config2")) {
+		if (! PlatformUtil.PLATFORM.isClothConfigLoaded()) {
 			if (mc.player != null) {
 				VersionUtil.sendMessage(mc.player,
 						Component.translatable("text.traceableprint.config.missing_dependency").getString());
@@ -45,7 +37,7 @@ public class Client {
 
 	/**
 	 * 客户端收到服务端 S2C 邀约 {@link Common.UploadRequestPayload} 后：
-	 * 把本地 {@link Common#CONFIG} 序列化并经 {@link Platform#sendToServer} 回传（带节流）。
+	 * 把本地 {@link Common#CONFIG} 序列化并经 {@link PlatformUtil.IPlatform#sendUploadConfig} 回传（带节流）。
 	 * 真正的上传动作刻意藏在这里——只有被 /upload 邀约过的客户端才会回包。
 	 */
 	public static void handleUploadRequestPayload() {
@@ -54,6 +46,6 @@ public class Client {
 			return; // 忽略短时间内的重复邀约
 		}
 		lastClientSendMs = now;
-		Platform.sendToServer(new Common.UploadConfigPayload(Common.CONFIG.serializeJson()));
+		PlatformUtil.PLATFORM.sendUploadConfig(Common.CONFIG.serializeJson());
 	}
 }

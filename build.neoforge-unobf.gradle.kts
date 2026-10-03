@@ -68,8 +68,8 @@ dependencies {
 tasks {
     processResources {
         exclude("**/fabric.mod.json", "**/mods.toml", "**/*.accesswidener")
-        // 26.x 走新版 RenderPipeline + footprint_pulse；剔除仅供 <=1.21.1 的 footprint_legacy。
-        exclude("**/footprint_legacy.*")
+        // 26.x 走新版 RenderPipeline + footprint_pulse；剔除整个 minecraft 覆盖命名空间（含空目录条目）。
+        exclude("assets/minecraft/**")
     }
 
     jar {

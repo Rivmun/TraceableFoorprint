@@ -1,14 +1,10 @@
 //? if forge {
 /*package com.rimo.traceableprint.loaders.forge;
 
-import com.rimo.traceableprint.Client;
-import com.rimo.traceableprint.Common;
-import com.rimo.traceableprint.DedicatedServer;
-import com.rimo.traceableprint.VersionUtil;
+import com.rimo.traceableprint.*;
 import com.rimo.traceableprint.config.ConfigScreen;
 import com.rimo.traceableprint.config.MissingDependencyScreen;
 import com.rimo.traceableprint.entity.FootprintEntityRenderer;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
 import net.minecraftforge.api.distmarker.Dist;
@@ -41,6 +37,31 @@ import java.nio.file.Path;
 // 注：1.20.1 javafml 只支持无参构造器（IEventBus 注入是 1.20.4+），mod 总线须经 FMLJavaModLoadingContext 自取。
 @Mod(Common.MOD_ID)
 public class Platform {
+	// 类加载（mod 实例化时触发 <clinit>）把本加载器实现注册进公共接口单例，早于实体注册/事件。
+	static {
+		PlatformUtil.PLATFORM = new PlatformUtil.IPlatform() {
+			@Override
+			public boolean isClothConfigLoaded() {
+				return ModList.get().isLoaded("cloth_config");
+			}
+
+			@Override
+			public Path getConfigFolder() {
+				return FMLPaths.CONFIGDIR.get();
+			}
+
+			@Override
+			public void sendUploadRequest(ServerPlayer player) {
+				CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new Common.UploadRequestPayload());
+			}
+
+			@Override
+			public void sendUploadConfig(String json) {
+				CHANNEL.sendToServer(new Common.UploadConfigPayload(json));
+			}
+		};
+	}
+
 	// - - - - - 网络：单通道 SimpleChannel，两类 payload 各占一个 discriminator - - - - -
 	private static final String PROTOCOL_VERSION = "1";
 	private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
@@ -115,7 +136,7 @@ public class Platform {
 			// ConfigScreen 的引用只在「已装 cloth」分支出现，配合 JVM 按需类加载，cloth 缺席时该类不会被解析。
 			ModLoadingContext.get().registerExtensionPoint(ConfigScreenHandler.ConfigScreenFactory.class,
 					() -> new ConfigScreenHandler.ConfigScreenFactory((client, parent) ->
-							isModLoaded("cloth_config") ? ConfigScreen.create(parent) : new MissingDependencyScreen(parent)));
+						ModList.get().isLoaded("cloth_config") ? ConfigScreen.create(parent) : new MissingDependencyScreen(parent)));
 		}
 
 		@SubscribeEvent
@@ -133,32 +154,6 @@ public class Platform {
 		public static void onRegisterCommands(RegisterCommandsEvent event) {
 			DistExecutor.runWhenOn(Dist.DEDICATED_SERVER, () -> () -> DedicatedServer.registerCommand(event.getDispatcher()));
 		}
-	}
-
-	// - - - - - Platform specific function - - - - -
-	// channel 参数与 fabric 签名对齐（本模组单通道，故忽略之，直接查本通道在远端连接上是否握手成功）。
-	public static boolean canReceive(ServerPlayer player, ResourceLocation channel) {
-		return CHANNEL.isRemotePresent(player.connection.connection);
-	}
-
-	public static void sendToPlayer(ServerPlayer player, Common.UploadRequestPayload payload) {
-		CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), payload);
-	}
-
-	public static void sendToServer(Common.UploadConfigPayload payload) {
-		CHANNEL.sendToServer(payload);
-	}
-
-	public static boolean isModLoaded(String id) {
-		return ModList.get().isLoaded(id);
-	}
-
-	public static Path getConfigFolder() {
-		return FMLPaths.CONFIGDIR.get();
-	}
-
-	public static boolean isFabric() {
-		return false;
 	}
 }
 *///? }

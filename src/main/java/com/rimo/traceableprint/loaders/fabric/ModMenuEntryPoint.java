@@ -4,6 +4,7 @@ package com.rimo.traceableprint.loaders.fabric;
 import com.rimo.traceableprint.config.MissingDependencyScreen;
 import com.terraformersmc.modmenu.api.ConfigScreenFactory;
 import com.terraformersmc.modmenu.api.ModMenuApi;
+import net.fabricmc.loader.api.FabricLoader;
 
 /**
  * ModMenu 配置入口。
@@ -20,7 +21,7 @@ import com.terraformersmc.modmenu.api.ModMenuApi;
 public class ModMenuEntryPoint implements ModMenuApi {
 	@Override
 	public ConfigScreenFactory<?> getModConfigScreenFactory() {
-		return parent -> Platform.isModLoaded("cloth-config2")
+		return parent -> FabricLoader.getInstance().isModLoaded("cloth-config2")
 				? com.rimo.traceableprint.config.ConfigScreen.create(parent)
 				: new MissingDependencyScreen(parent);
 	}

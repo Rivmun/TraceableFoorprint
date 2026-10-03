@@ -1,10 +1,7 @@
 //? if fabric {
 package com.rimo.traceableprint.loaders.fabric;
 
-import com.rimo.traceableprint.Client;
-import com.rimo.traceableprint.Common;
-import com.rimo.traceableprint.DedicatedServer;
-import com.rimo.traceableprint.VersionUtil;
+import com.rimo.traceableprint.*;
 import com.rimo.traceableprint.entity.FootprintEntityRenderer;
 import net.fabricmc.api.*;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -29,13 +26,49 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 //? if <= 1.20.1 {
 //? } else {
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 //? }
 import net.minecraft.server.level.ServerPlayer;
 
 import java.nio.file.Path;
 
 public class Platform implements ModInitializer {
+	// 类加载时把本加载器实现注册进公共接口单例，供公共部分经 Platform.PLATFORM 调用。
+	// 静态初始化先于任何方法（含 Common→Config 的 <clinit>），确保 getConfigFolder 可用。
+	static {
+		PlatformUtil.PLATFORM = new PlatformUtil.IPlatform() {
+			@Override
+			public boolean isClothConfigLoaded() {
+				return FabricLoader.getInstance().isModLoaded("cloth-config2");
+			}
+
+			@Override
+			public Path getConfigFolder() {
+				return FabricLoader.getInstance().getConfigDir();
+			}
+
+			@Override
+			public void sendUploadRequest(ServerPlayer player) {
+				//? if <= 1.20.1 {
+				/*ServerPlayNetworking.send(player, Common.UploadRequestPayload.TYPE, new FriendlyByteBuf(Unpooled.buffer()));
+				*///? } else {
+				ServerPlayNetworking.send(player, new Common.UploadRequestPayload());
+				//? }
+			}
+
+			@Override
+			@Environment(EnvType.CLIENT)
+			public void sendUploadConfig(String json) {
+				//? if <= 1.20.1 {
+				/*FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
+				buf.writeUtf(json);
+				ClientPlayNetworking.send(Common.UploadConfigPayload.TYPE, buf);
+				*///? } else {
+				ClientPlayNetworking.send(new Common.UploadConfigPayload(json));
+				//? }
+			}
+		};
+	}
+
 	@Override
 	public void onInitialize() {
 		Common.init();
@@ -106,42 +139,6 @@ public class Platform implements ModInitializer {
 					(payload, context) -> DedicatedServer.handleUploadConfigPayload(payload, context.player()));
 			//? }
 		}
-	}
-
-	// - - - - - Platform specific function - - - - -
-	//? if <= 1.20.1 {
-	/*public static boolean canReceive(ServerPlayer player, net.minecraft.resources.ResourceLocation channel) {
-		return ServerPlayNetworking.canSend(player, channel);
-	}
-	public static void sendToPlayer(ServerPlayer player, Common.UploadRequestPayload payload) {
-		ServerPlayNetworking.send(player, Common.UploadRequestPayload.TYPE, new FriendlyByteBuf(Unpooled.buffer()));
-	}
-	@Environment(EnvType.CLIENT)
-	public static void sendToServer(Common.UploadConfigPayload payload) {
-		FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
-		buf.writeUtf(payload.json());
-		ClientPlayNetworking.send(Common.UploadConfigPayload.TYPE, buf);
-	}
-	*///? } else {
-	public static boolean canReceive(ServerPlayer player, CustomPacketPayload.Type<?> type) {
-		return ServerPlayNetworking.canSend(player, type);
-	}
-	public static void sendToPlayer(ServerPlayer player, CustomPacketPayload payload) {
-		ServerPlayNetworking.send(player, payload);
-	}
-	@Environment(EnvType.CLIENT)
-	public static void sendToServer(CustomPacketPayload payload) {
-		ClientPlayNetworking.send(payload);
-	}
-	//? }
-	public static boolean isModLoaded(String id) {
-		return FabricLoader.getInstance().isModLoaded(id);
-	}
-	public static Path getConfigFolder() {
-		return FabricLoader.getInstance().getConfigDir();
-	}
-	public static boolean isFabric() {
-		return true;
 	}
 }
 //? }

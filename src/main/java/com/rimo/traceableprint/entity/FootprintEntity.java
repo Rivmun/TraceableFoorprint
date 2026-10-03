@@ -224,7 +224,7 @@ public class FootprintEntity extends Entity {
 		long lifetime = Common.CONFIG.getFootprintLifetimeTicks();
 		if (genTime <= 0 || lifetime <= 0) return 0.0F;
 		long now = this.level().getLevelData().getGameTime();
-		return Math.min(1.0F, Math.max(0.0F, (float) (now - genTime) / (float) lifetime));
+		return Math.clamp((float) (now - genTime) / (float) lifetime, 0.0F, 1.0F);
 	}
 
 	/**
@@ -301,7 +301,7 @@ public class FootprintEntity extends Entity {
 		this.setTextureName(input.getStringOr("TextureName", ""));
 	}
 	//? }
-	
+
 	//? if <= 1.21.1 {
 	/*@Override
 	protected void addAdditionalSaveData(CompoundTag tag) {

@@ -3,13 +3,6 @@ package com.rimo.traceableprint;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
 import com.rimo.traceableprint.config.Config;
-//? if fabric {
-import com.rimo.traceableprint.loaders.fabric.Platform;
-//? } else if neoforge {
-/*import com.rimo.traceableprint.loaders.neoforge.Platform;
-*///? } else if forge {
-/*import com.rimo.traceableprint.loaders.forge.Platform;
-*///? }
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.level.ServerPlayer;
 //? if > 1.21.1 {
@@ -32,7 +25,7 @@ import static net.minecraft.commands.Commands.literal;
  * <p>握手（防刷）：{@code /upload} 校验 op 通过后下发空 {@link Common.UploadRequestPayload} 邀约并登记一次性令牌；
  * 客户端收到才回传 {@link Common.UploadConfigPayload}；服务端仅接受「命中未过期令牌且发送方有 op 权限」的回包。</p>
  *
- * <p>消息一律走 {@link VersionUtil}（跨版本抽象），收发包一律走 {@link Platform}（跨 loader 抽象）。</p>
+ * <p>消息一律走 {@link VersionUtil}（跨版本抽象），收发包一律走 {@link PlatformUtil}（跨 loader 抽象）。</p>
  */
 public class DedicatedServer {
 	// 上传/开关所需最低权限：op 等级 2（GAMEMASTER，与多数影响玩法的命令一致）
@@ -97,13 +90,9 @@ public class DedicatedServer {
 			VersionUtil.sendSystemMessage(ctx, "Please wait a moment before uploading again.");
 			return 0;
 		}
-		if (!Platform.canReceive(player, Common.UploadRequestPayload.TYPE)) {
-			VersionUtil.sendSystemMessage(ctx, "Your client does not accept config uploads (is TraceablePrint installed on it?).");
-			return 0;
-		}
 		lastUploadByPlayer.put(player.getUUID(), now);
 		pendingByPlayer.put(player.getUUID(), now + SOLICIT_TTL_MS);
-		Platform.sendToPlayer(player, new Common.UploadRequestPayload());
+		PlatformUtil.PLATFORM.sendUploadRequest(player);
 		VersionUtil.sendSystemMessage(ctx, "Upload requested — your client is now sending its config to the server...");
 		return 1;
 	}
