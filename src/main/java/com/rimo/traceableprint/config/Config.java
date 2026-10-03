@@ -490,6 +490,68 @@ public class Config {
 		return out;
 	}
 
+	// - - - - - ConfigScreen 逐行输入校验（本不允重复键，仅对玩家自由输入做兜底） - - - - -
+	// 下列方法只回答“合法/非法 + 错因”，不改动数据；非法时 {@link #validateFloatRow} /
+	// {@link #validateTextureRow} 返回一个错误码（供上层拼翻译键），{@code null} 表示合法。
+
+	/** 资源 id（可带 {@code #} 前缀当标签）：{@code [namespace]:[path]}，字符集对齐原版 {@code ResourceLocation}。 */
+	private static final java.util.regex.Pattern ID_OR_TAG_PATTERN =
+			java.util.regex.Pattern.compile("#?[a-z0-9._-]+:[a-z0-9._/\\-]+");
+
+	/** 是否为合法的 {@code namespace:path} 或 {@code #namespace:tag}。 */
+	public static boolean isIdOrTag(String s) {
+		return s != null && ID_OR_TAG_PATTERN.matcher(s).matches();
+	}
+
+	/**
+	 * 从 {@code "id,..."} 行里抽取 id 段（去前导空白），供重复检测；无逗号或 id 为空时返回 {@code null}。
+	 */
+	public static String extractRowId(String row) {
+		if (row == null) return null;
+		int comma = row.indexOf(',');
+		if (comma < 0) return null;
+		String id = row.substring(0, comma).trim();
+		return id.isEmpty() ? null : id;
+	}
+
+	/**
+	 * 校验 {@code "id,float"} 形态单行。合法返回 {@code null}；否则返回错误码：
+	 * {@code empty_row} / {@code missing_comma} / {@code empty_id} / {@code invalid_id} / {@code empty_value} / {@code invalid_float}。
+	 */
+	public static String validateFloatRow(String row) {
+		if (row == null || row.isBlank()) return "empty_row";
+		int comma = row.indexOf(',');
+		if (comma < 0) return "missing_comma";
+		String id = row.substring(0, comma).trim();
+		if (id.isEmpty()) return "empty_id";
+		if (!isIdOrTag(id)) return "invalid_id";
+		String val = row.substring(comma + 1).trim();
+		if (val.isEmpty()) return "empty_value";
+		try {
+			Float.parseFloat(val);
+		} catch (NumberFormatException e) {
+			return "invalid_float";
+		}
+		return null;
+	}
+
+	/**
+	 * 校验 {@code "id,candidate1,candidate2,..."} 形态单行。合法返回 {@code null}；否则错误码：
+	 * {@code empty_row} / {@code missing_comma} / {@code empty_id} / {@code invalid_id} / {@code empty_candidates}。
+	 */
+	public static String validateTextureRow(String row) {
+		if (row == null || row.isBlank()) return "empty_row";
+		int comma = row.indexOf(',');
+		if (comma < 0) return "missing_comma";
+		String id = row.substring(0, comma).trim();
+		if (id.isEmpty()) return "empty_id";
+		if (!isIdOrTag(id)) return "invalid_id";
+		for (String name : row.substring(comma + 1).split(",")) {
+			if (!name.trim().isEmpty()) return null;
+		}
+		return "empty_candidates";
+	}
+
 	// - - - - - 老配置 List<String> 字段的一次性迁移（JsonParser 前置 pass，之后 save 就写出 Map 形态） - - - - -
 
 	/** 老字段名 → 新字段名，float 类 Map 五对（前四对语义相同、textureMap 值形态是字符串数组） */

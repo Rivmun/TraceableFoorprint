@@ -4,10 +4,17 @@ import com.rimo.traceableprint.Common;
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
+import me.shedaniel.clothconfig2.impl.builders.StringListBuilder;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * 基于 ClothConfig 的配置界面
@@ -18,6 +25,8 @@ import java.util.ArrayList;
  *
  * <p>提示文案全部走翻译键（前缀 {@code text.traceableprint.}）；tooltip 只放一两句短说明，
  * 像自定义贴图那种多约束的复杂解释改用内联的文本描述项（startTextDescription）逐条展示，避免 tooltip 过长难以阅读。
+ *
+ * <p>分类与条目顺序与语言文件（zh_cn / en_us）严格对齐：通用 → 外观 → 过滤 → 覆写 → 自定义贴图。
  */
 public class ConfigScreen {
 	// Common.CONFIG 活单例的局部别名，缩短下面消费者/初值表达的重复前缀
@@ -32,8 +41,8 @@ public class ConfigScreen {
 		ConfigEntryBuilder eb = builder.entryBuilder();
 
 		buildGeneral(builder, eb);
-		buildSpawn(builder, eb);
 		buildAppearance(builder, eb);
+		buildFilter(builder, eb);
 		buildPerMob(builder, eb);
 		buildTexture(builder, eb);
 
@@ -48,8 +57,55 @@ public class ConfigScreen {
 		cat.addEntry(eb.startEnumSelector(t("option.enableMod"), Config.WorkMode.class, CONFIG.getEnableMod())
 				.setDefaultValue(Config.DEFAULT_ENABLE_MOD)
 				.setEnumNameProvider(mode -> Component.translatable(((Config.WorkMode) mode).getTranslationKey()))
-				.setTooltip(t("option.enableMod.@Tooltip"))
 				.setSaveConsumer(CONFIG::setEnableMod)
+				.build());
+
+		cat.addEntry(eb.startIntSlider(t("option.spawnInterval"), CONFIG.getSpawnIntervalTicks(), 10, 200)
+				.setDefaultValue(Config.DEFAULT_SPAWN_INTERVAL_TICKS)
+				.setTextGetter(ticks -> Component.nullToEmpty(ticks + "t"))
+				.setTooltip(t("option.spawnInterval.@Tooltip"))
+				.setSaveConsumer(CONFIG::setSpawnIntervalTicks)
+				.build());
+
+		cat.addEntry(eb.startLongSlider(t("option.lifetime"), CONFIG.getFootprintLifetimeTicks(), 600, 12000)
+				.setDefaultValue(Config.DEFAULT_FOOTPRINT_LIFETIME_TICKS)
+				.setTextGetter(ConfigScreen::seconds)
+				.setSaveConsumer(CONFIG::setFootprintLifetimeTicks)
+				.build());
+
+		cat.addEntry(eb.startDoubleField(t("option.minDistance"), CONFIG.getMinSpawnDistance())
+				.setDefaultValue(Config.DEFAULT_MIN_SPAWN_DISTANCE)
+				.setMin(1).setMax(16)
+				.setTooltip(t("option.minDistance.@Tooltip"))
+				.setSaveConsumer(CONFIG::setMinSpawnDistance)
+				.build());
+
+		cat.addEntry(eb.startBooleanToggle(t("option.printsForInvisible"), CONFIG.isPrintsForInvisible())
+				.setDefaultValue(Config.DEFAULT_PRINTS_FOR_INVISIBLE)
+				.setTooltip(t("option.printsForInvisible.@Tooltip"))
+				.setSaveConsumer(CONFIG::setPrintsForInvisible)
+				.build());
+	}
+
+	// - - - 外观 - - -
+	private static void buildAppearance(ConfigBuilder builder, ConfigEntryBuilder eb) {
+		ConfigCategory cat = builder.getOrCreateCategory(Component.translatable("text.traceableprint.category.appearance"));
+
+		// 基准尺寸的结果会乘以服务端同步的逐生物倍率，故置于“仅本地”声明之上；header 以下各项才是纯本地表现项
+		cat.addEntry(eb.startFloatField(t("option.textureSize"), CONFIG.getFootprintTextureSize())
+				.setDefaultValue(Config.DEFAULT_FOOTPRINT_TEXTURE_SIZE)
+				.setMin(0.01F).setMax(1.5F)
+				.setTooltip(t("option.textureSize.@Tooltip"))
+				.setSaveConsumer(CONFIG::setFootprintTextureSize)
+				.build());
+
+		cat.addEntry(eb.startTextDescription(t("appearance.header")).build());
+
+		cat.addEntry(eb.startFloatField(t("option.yOffset"), CONFIG.getFootprintYOffset())
+				.setDefaultValue(Config.DEFAULT_FOOTPRINT_Y_OFFSET)
+				.setMin(-1).setMax(1)
+				.setTooltip(t("option.yOffset.@Tooltip"))
+				.setSaveConsumer(CONFIG::setFootprintYOffset)
 				.build());
 
 		cat.addEntry(eb.startBooleanToggle(t("option.notifyTraced"), CONFIG.isNotifyTraced())
@@ -58,16 +114,9 @@ public class ConfigScreen {
 				.setSaveConsumer(CONFIG::setNotifyTraced)
 				.build());
 
-		cat.addEntry(eb.startBooleanToggle(t("option.printsForInvisible"), CONFIG.isPrintsForInvisible())
-				.setDefaultValue(Config.DEFAULT_PRINTS_FOR_INVISIBLE)
-				.setTooltip(t("option.printsForInvisible.@Tooltip"))
-				.setSaveConsumer(CONFIG::setPrintsForInvisible)
-				.build());
-
 		cat.addEntry(eb.startIntSlider(t("option.highlightTicks"), CONFIG.getHighlightTicks(), 20, 1200)
 				.setDefaultValue(Config.DEFAULT_HIGHLIGHT_TICKS)
 				.setTextGetter(ConfigScreen::seconds)
-				.setTooltip(t("option.highlightTicks.@Tooltip"))
 				.setSaveConsumer(CONFIG::setHighlightTicks)
 				.build());
 
@@ -76,6 +125,24 @@ public class ConfigScreen {
 				.setDefaultValue(Config.DEFAULT_SHOW_DIRECTION_PARTICLES)
 				.setTooltip(t("option.directionParticles.@Tooltip"))
 				.setSaveConsumer(CONFIG::setShowDirectionParticles)
+				.build());
+	}
+
+	// - - - 过滤 - - -
+	private static void buildFilter(ConfigBuilder builder, ConfigEntryBuilder eb) {
+		ConfigCategory cat = builder.getOrCreateCategory(Component.translatable("text.traceableprint.category.filter"));
+
+		cat.addEntry(eb.startFloatField(t("option.hardnessGate"), CONFIG.getHardnessGate())
+				.setDefaultValue(Config.DEFAULT_HARDNESS_GATE)
+				.setMin(0).setMax(20)
+				.setTooltip(t("option.hardnessGate.@Tooltip"))
+				.setSaveConsumer(CONFIG::setHardnessGate)
+				.build());
+
+		cat.addEntry(eb.startStrList(t("option.applyBlocks"), CONFIG.getApplyBlocks())
+				.setDefaultValue(new ArrayList<>())
+				.setTooltip(t("option.applyBlocks.@Tooltip"))
+				.setSaveConsumer(CONFIG::setApplyBlocks)
 				.build());
 
 		// 生物名单：黑名单还是白名单由下面的反转开关决定，两者配在同屏相邻位置便于对照
@@ -90,118 +157,80 @@ public class ConfigScreen {
 				.setTooltip(t("option.entityList.@Tooltip"))
 				.setSaveConsumer(CONFIG::setEntityList)
 				.build());
-
-		cat.addEntry(eb.startStrList(t("option.applyBlocks"), CONFIG.getApplyBlocks())
-				.setDefaultValue(new ArrayList<>())
-				.setTooltip(t("option.applyBlocks.@Tooltip"))
-				.setSaveConsumer(CONFIG::setApplyBlocks)
-				.build());
 	}
 
-	// - - - 生成 - - -
-	private static void buildSpawn(ConfigBuilder builder, ConfigEntryBuilder eb) {
-		ConfigCategory cat = builder.getOrCreateCategory(Component.translatable("text.traceableprint.category.spawn"));
-
-		cat.addEntry(eb.startLongSlider(t("option.lifetime"), CONFIG.getFootprintLifetimeTicks(), 600, 12000)
-				.setDefaultValue(Config.DEFAULT_FOOTPRINT_LIFETIME_TICKS)
-				.setTextGetter(ConfigScreen::seconds)
-				.setTooltip(t("option.lifetime.@Tooltip"))
-				.setSaveConsumer(CONFIG::setFootprintLifetimeTicks)
-				.build());
-
-		cat.addEntry(eb.startIntSlider(t("option.spawnInterval"), CONFIG.getSpawnIntervalTicks(), 10, 200)
-				.setDefaultValue(Config.DEFAULT_SPAWN_INTERVAL_TICKS)
-				.setTextGetter(ticks -> Component.nullToEmpty(ticks + "t"))
-				.setTooltip(t("option.spawnInterval.@Tooltip"))
-				.setSaveConsumer(CONFIG::setSpawnIntervalTicks)
-				.build());
-
-		cat.addEntry(eb.startDoubleField(t("option.minDistance"), CONFIG.getMinSpawnDistance())
-				.setDefaultValue(Config.DEFAULT_MIN_SPAWN_DISTANCE)
-				.setMin(1).setMax(16)
-				.setTooltip(t("option.minDistance.@Tooltip"))
-				.setSaveConsumer(CONFIG::setMinSpawnDistance)
-				.build());
-
-		cat.addEntry(eb.startFloatField(t("option.hardnessGate"), CONFIG.getHardnessGate())
-				.setDefaultValue(Config.DEFAULT_HARDNESS_GATE)
-				.setMin(0).setMax(20)
-				.setTooltip(t("option.hardnessGate.@Tooltip"))
-				.setSaveConsumer(CONFIG::setHardnessGate)
-				.build());
-	}
-
-	// - - - 外观与位置 - - -
-	private static void buildAppearance(ConfigBuilder builder, ConfigEntryBuilder eb) {
-		ConfigCategory cat = builder.getOrCreateCategory(Component.translatable("text.traceableprint.category.appearance"));
-
-		cat.addEntry(eb.startFloatField(t("option.textureSize"), CONFIG.getFootprintTextureSize())
-				.setDefaultValue(Config.DEFAULT_FOOTPRINT_TEXTURE_SIZE)
-				.setMin(0.01F).setMax(1.5F)
-				.setTooltip(t("option.textureSize.@Tooltip"))
-				.setSaveConsumer(CONFIG::setFootprintTextureSize)
-				.build());
-
-		cat.addEntry(eb.startFloatField(t("option.yOffset"), CONFIG.getFootprintYOffset())
-				.setDefaultValue(Config.DEFAULT_FOOTPRINT_Y_OFFSET)
-				.setMin(-1).setMax(1)
-				.setTooltip(t("option.yOffset.@Tooltip"))
-				.setSaveConsumer(CONFIG::setFootprintYOffset)
-				.build());
-
-		// 默认左右/前后偏移已不再开放（硬编码进 LivingEntityMixin）；逐生物的偏移仍在「逐生物覆写」分类里编辑。
-	}
-
-	// - - - 逐生物覆写表 - - -
+	// - - - 逐生物/方块覆写表 - - -
 	private static void buildPerMob(ConfigBuilder builder, ConfigEntryBuilder eb) {
 		ConfigCategory cat = builder.getOrCreateCategory(Component.translatable("text.traceableprint.category.per_mob"));
 
 		// 该分类整体是「条目字符串」列表，格式统一但字段各异，先在顶部放一段格式说明，比每个列表各写一遍更省版面
 		cat.addEntry(eb.startTextDescription(t("per_mob.header")).build());
 
-		cat.addEntry(eb.startStrList(t("option.sideOffsetList"), CONFIG.getSideOffsetList())
-				.setDefaultValue(new ArrayList<>(Config.DEF_SIDE_OFFSET_LIKE))
-				.setTooltip(t("option.sideOffsetList.@Tooltip"))
-				.setSaveConsumer(CONFIG::setSideOffsetList)
-				.build());
+		addValidatedList(cat, eb, t("option.sizeList"), CONFIG.getSizeList(),
+				new ArrayList<>(Config.DEF_SIZE_PER_MOB), t("option.sizeList.@Tooltip"),
+				CONFIG::setSizeList, Config::validateFloatRow);
 
-		cat.addEntry(eb.startStrList(t("option.forwardOffsetList"), CONFIG.getForwardOffsetList())
-				.setDefaultValue(new ArrayList<>(Config.DEF_FORWARD_OFFSET_LIKE))
-				.setTooltip(t("option.forwardOffsetList.@Tooltip"))
-				.setSaveConsumer(CONFIG::setForwardOffsetList)
-				.build());
+		addValidatedList(cat, eb, t("option.sideOffsetList"), CONFIG.getSideOffsetList(),
+				new ArrayList<>(Config.DEF_SIDE_OFFSET_LIKE), t("option.sideOffsetList.@Tooltip"),
+				CONFIG::setSideOffsetList, Config::validateFloatRow);
 
-		cat.addEntry(eb.startStrList(t("option.sizeList"), CONFIG.getSizeList())
-				.setDefaultValue(new ArrayList<>(Config.DEF_SIZE_PER_MOB))
-				.setTooltip(t("option.sizeList.@Tooltip"))
-				.setSaveConsumer(CONFIG::setSizeList)
-				.build());
+		addValidatedList(cat, eb, t("option.forwardOffsetList"), CONFIG.getForwardOffsetList(),
+				new ArrayList<>(Config.DEF_FORWARD_OFFSET_LIKE), t("option.forwardOffsetList.@Tooltip"),
+				CONFIG::setForwardOffsetList, Config::validateFloatRow);
 
-		cat.addEntry(eb.startStrList(t("option.blockHeightList"), CONFIG.getBlockHeightList())
-				.setDefaultValue(new ArrayList<>(Config.DEF_BLOCK_HEIGHT))
-				.setTooltip(t("option.blockHeightList.@Tooltip"))
-				.setSaveConsumer(CONFIG::setBlockHeightList)
-				.build());
+		addValidatedList(cat, eb, t("option.blockHeightList"), CONFIG.getBlockHeightList(),
+				new ArrayList<>(Config.DEF_BLOCK_HEIGHT), t("option.blockHeightList.@Tooltip"),
+				CONFIG::setBlockHeightList, Config::validateFloatRow);
 	}
 
 	// - - - 自定义贴图 - - -
 	private static void buildTexture(ConfigBuilder builder, ConfigEntryBuilder eb) {
 		ConfigCategory cat = builder.getOrCreateCategory(Component.translatable("text.traceableprint.category.texture"));
 
-		cat.addEntry(eb.startStrList(t("option.textureList"), CONFIG.getTextureList())
-				.setDefaultValue(new ArrayList<>(Config.DEF_TEXTURE_LIST))
-				.setSaveConsumer(CONFIG::setTextureList)
-				.build());
+		addValidatedList(cat, eb, t("option.textureList"), CONFIG.getTextureList(),
+				new ArrayList<>(Config.DEF_TEXTURE_LIST), null,
+				CONFIG::setTextureList, Config::validateTextureRow);
 
-		// 贴图项约束多且涉及「服务端优先」这一反直觉语义，用内联文本描述逐条摊开，而不是塞进一个超长 tooltip
+		// 贴图项约束多，用内联文本描述逐条摊开，而不是塞进一个超长 tooltip
 		for (String key : new String[] {
 				"texture.desc.format",
 				"texture.desc.path",
-				"texture.desc.match",
-				"texture.desc.server",
-				"texture.desc.single" }) {
+				"texture.desc.match" }) {
 			cat.addEntry(eb.startTextDescription(t(key)).build());
 		}
+	}
+
+	/**
+	 * 构造一个带实时校验的字符串列表项，接 Cloth Config 的两个原生校验钩子：
+	 * <ul>
+	 *   <li>{@code setCellErrorSupplier(Function<String,…>)} 逐行校验格式（{@code rowValidator}）：非法行就地标红；</li>
+	 *   <li>{@code setErrorSupplier(Function<List<String>,…>)} 整表校验：跨行扫描同一 id 是否出现 &gt; 1 次，命中则报 {@code duplicate_id}。</li>
+	 * </ul>
+	 * 重复键是本模组设计上不允许的（一个 id 只应一条覆写），但输入框对玩家自由，故在此兜底；
+	 * 两个钩子都是 Cloth 原生的，无需闭包引用已 build 的 entry。
+	 */
+	private static void addValidatedList(ConfigCategory cat, ConfigEntryBuilder eb, Component label,
+			List<String> current, List<String> defaultValue, Component tooltip,
+			Consumer<List<String>> saveConsumer, Function<String, String> rowValidator) {
+		StringListBuilder builder = eb.startStrList(label, current)
+				.setDefaultValue(defaultValue)
+				.setSaveConsumer(saveConsumer)
+				.setCellErrorSupplier(row -> {
+					String code = rowValidator.apply(row);
+					return code == null ? Optional.empty() : Optional.of(t("row_error." + code));
+				})
+				.setErrorSupplier(rows -> {
+					Set<String> seen = new HashSet<>();
+					for (String row : rows) {
+						String id = Config.extractRowId(row);
+						if (id != null && !seen.add(id)) return Optional.of(t("row_error.duplicate_id"));
+					}
+					return Optional.empty();
+				});
+		if (tooltip != null) {
+			builder.setTooltip(tooltip);
+		}
+		cat.addEntry(builder.build());
 	}
 
 	/** 取翻译组件，统一前缀 {@code text.traceableprint.}，减少上文噪音。 */
