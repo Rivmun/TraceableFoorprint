@@ -51,7 +51,7 @@
   "text.traceableprint.option.forwardOffsetList": "Per-Mob Forward Offset",
   "text.traceableprint.option.forwardOffsetList.@Tooltip": "Set the front/back offset for specific mobs.",
   "text.traceableprint.option.blockHeightList": "Per-Block Height Offset",
-  "text.traceableprint.option.blockHeightList.@Tooltip": "Apply an extra height offset to footprints on specific blocks. Not controlled by the server.",
+  "text.traceableprint.option.blockHeightList.@Tooltip": "Apply an extra height offset to footprints on specific blocks.",
 
   "text.traceableprint.category.texture": "Custom Textures",
   "text.traceableprint.option.textureList": "Mob Texture Overrides",

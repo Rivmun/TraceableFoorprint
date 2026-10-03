@@ -174,7 +174,7 @@ public class Config {
 		this.highlightTicks = Math.max(1, ticks);
 	}
 
-	/** 脚印抬高量，单位为方块，与脚印 Y 直接相加 */
+	/** 脚印贴图全局抬高量，单位为方块；纯渲染偏移，仅叠加到渲染器的 renderY，不改变实体真实坐标 / 判定盒 / 存续检测 */
 	public float getFootprintYOffset() {
 		return footprintYOffset;
 	}

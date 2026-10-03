@@ -62,8 +62,9 @@ public class FootprintEntity extends Entity {
 	// 服务端 tick 据此判定过期自毁，客户端渲染器据此计算淡出透明度。
 	private static final EntityDataAccessor<Long> GEN_TIME =
 			SynchedEntityData.defineId(FootprintEntity.class, EntityDataSerializers.LONG);
-	// 脚印贴图缩放倍率（服务端生成时按父生物类型/体型算好并同步）：仅缩放客户端贴图四边形，不改实体碰撞箱。
-	private static final EntityDataAccessor<Float> TEX_SCALE =
+	// 脚印贴图最终边长（方块，服务端生成时按「基准尺寸 × 逐生物倍率 × 幼体 × getScale」算好并同步）：
+	// 客户端渲染器直接用其一半作半宽，不再读本地基准、不再叠加位堆栈缩放；不改实体碰撞箱。
+	private static final EntityDataAccessor<Float> TEX_SIZE =
 			SynchedEntityData.defineId(FootprintEntity.class, EntityDataSerializers.FLOAT);
 	// 脚印贴图名（服务端生成时按父生物注册名在 config.textureList 命中后随机选定并同步）：
 	// 存字符串而非索引，是为了不要求两端配置一致——客户端拿到名字后自行组装 Identifier 并校验资源包里是否存在，
@@ -142,7 +143,7 @@ public class FootprintEntity extends Entity {
 		this.entityData.define(NEXT_UUID, "");
 		this.entityData.define(IS_TAIL, false);
 		this.entityData.define(GEN_TIME, 0L);
-		this.entityData.define(TEX_SCALE, 1.0F);
+		this.entityData.define(TEX_SIZE, com.rimo.traceableprint.config.Config.DEFAULT_FOOTPRINT_TEXTURE_SIZE);
 		this.entityData.define(TEX_NAME, "");
 	}
 	*///? } else {
@@ -152,19 +153,19 @@ public class FootprintEntity extends Entity {
 		builder.define(NEXT_UUID, "");
 		builder.define(IS_TAIL, false);
 		builder.define(GEN_TIME, 0L);
-		builder.define(TEX_SCALE, 1.0F);
+		builder.define(TEX_SIZE, com.rimo.traceableprint.config.Config.DEFAULT_FOOTPRINT_TEXTURE_SIZE);
 		builder.define(TEX_NAME, "");
 	}
 	//? }
 
-	// 设置脚印贴图缩放倍率（仅服务端生成时写入，随实体同步到客户端）
-	public void setTexScale(float scale) {
-		this.entityData.set(TEX_SCALE, scale);
+	// 设置脚印贴图最终边长（方块，仅服务端生成时写入，随实体同步到客户端）
+	public void setTexSize(float size) {
+		this.entityData.set(TEX_SIZE, size);
 	}
 
-	// 获取脚印贴图缩放倍率（双端可读）
-	public float getTexScale() {
-		return this.entityData.get(TEX_SCALE);
+	// 获取脚印贴图最终边长（方块，双端可读）
+	public float getTexSize() {
+		return this.entityData.get(TEX_SIZE);
 	}
 
 	// 设置脚印贴图名（仅服务端生成时写入，随实体同步到客户端）；空串 = 使用默认贴图
@@ -286,8 +287,8 @@ public class FootprintEntity extends Entity {
 		} catch (IllegalStateException e) {
 			this.pendingGenTime = genTime;
 		}
-		// 恢复贴图缩放：缺失时按 1.0（默认大小）兜底
-		this.setTexScale((float) (tag.contains("TexScale") ? tag.getDouble("TexScale") : 1.0D));
+		// 恢复贴图边长：缺失时按基准尺寸兜底
+		this.setTexSize((float) (tag.contains("TexSize") ? tag.getDouble("TexSize") : com.rimo.traceableprint.config.Config.DEFAULT_FOOTPRINT_TEXTURE_SIZE));
 		// 恢复贴图名：缺失时按空串（默认 footprint 贴图）兜底
 		this.setTextureName(tag.getString("TextureName"));
 	}
@@ -307,8 +308,8 @@ public class FootprintEntity extends Entity {
 			// 极端情况：读档时机早于同步数据构建，缓到首次服务端 tick 补写
 			this.pendingGenTime = genTime;
 		}
-		// 恢复贴图缩放：缺失时按 1.0（默认大小）兜底
-		this.setTexScale((float) input.getDoubleOr("TexScale", 1.0D));
+		// 恢复贴图边长：缺失时按基准尺寸兜底
+		this.setTexSize((float) input.getDoubleOr("TexSize", com.rimo.traceableprint.config.Config.DEFAULT_FOOTPRINT_TEXTURE_SIZE));
 		// 恢复贴图名：缺失时按空串（默认 footprint 贴图）兑底。存档里的名字可能是旧配置留下的，
 		// 如今已从资源包删除也没关系——客户端解析时校验存在性，取不到自然退回默认。
 		this.setTextureName(input.getStringOr("TextureName", ""));
@@ -321,7 +322,7 @@ public class FootprintEntity extends Entity {
 		tag.putString("ParentUUID", getParentUUID().map(UUID::toString).orElse(""));
 		tag.putString("NextUUID", getNextUUID().map(UUID::toString).orElse(""));
 		tag.putLong("GenTime", this.getGenTime());
-		tag.putDouble("TexScale", this.getTexScale());
+		tag.putDouble("TexSize", this.getTexSize());
 		String textureName = this.getTextureName();
 		if (!textureName.isEmpty()) {
 			tag.putString("TextureName", textureName);
@@ -333,7 +334,7 @@ public class FootprintEntity extends Entity {
 		output.putString("ParentUUID", getParentUUID().map(UUID::toString).orElse(""));
 		output.putString("NextUUID", getNextUUID().map(UUID::toString).orElse(""));
 		output.putLong("GenTime", this.getGenTime());
-		output.putDouble("TexScale", this.getTexScale());
+		output.putDouble("TexSize", this.getTexSize());
 		String textureName = this.getTextureName();
 		if (!textureName.isEmpty()) {
 			output.putString("TextureName", textureName);

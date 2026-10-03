@@ -47,8 +47,8 @@ import org.joml.Matrix4f;
  *   （判定本就轴对齐）。零 mixin、不碰原版私有管线。
  */
 public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, FootprintEntityRenderer.FootprintRenderState> {
-	// 贴图水平尺寸（正方形边长）由配置 Common.CONFIG.getFootprintTextureSize() 驱动（默认 5/16，匹配原版像素大小）；
-	// 渲染时取其一半作为局部半宽/半长，逐生物 texScale 再通过位堆栈缩放乘在此基准上。
+	// 贴图水平尺寸（正方形边长）由服务端算好的最终边长（FootprintEntity.getTexSize()）直接决定：
+	// 渲染时取其一半作局部半宽/半长，不再读客户端基准、不再叠加位堆栈缩放。
 	// 贴图抬高量：生成时 0.02，随存续时间线性下沉，销毁前落到 0.01（而非固定值 + 随机抖动）。
 	// 下限 0.01 仍是为了避开与地面方块顶面共面的 z-fight；上限降到 0.02 则为了不再看起来悬浮在空中。
 	private static final float RENDER_Y_AT_BIRTH = 0.02F;
@@ -80,7 +80,7 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 	public void extractRenderState(FootprintEntity entity, FootprintRenderState state, float tickDelta) {
 		super.extractRenderState(entity, state, tickDelta);
 		state.yawDeg = entity.getYRot();
-		state.texScale = entity.getTexScale();
+		state.texSize = entity.getTexSize();
 		// 脚印贴图：把服务端同步下来的贴图名解析成可用路径（未定制/资源包里没这个文件 → 默认 footprint.png）。
 		// 两条渲染管线（天光半透明 / 高亮脉冲）都用这一个值，保证高亮前后贴图一致、不会一亮就跳回默认图。
 		state.texture = FootprintTextures.resolve(entity.getTextureName());
@@ -90,7 +90,8 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		// 存续淡出：剩余时长不足总时长一半时线性变透明（min(1, 剩余/(总/2))）
 		state.fadeAlpha = Math.clamp(entity.getFadeAlpha(), 0.0F, 1.0F);
 		// 存续下沉：按整段生命线性插值（与 fadeAlpha 的“后半段才淡出”是两条独立曲线，但同源于存续进度）
-		state.renderY = Mth.lerp(entity.getLifeProgress(), RENDER_Y_AT_BIRTH, RENDER_Y_AT_DEATH);
+		// 抬高量 = 存续下沉曲线 + 配置的全局贴图高度偏移（纯渲染，不影响实体坐标/判定盒/存续检测）
+		state.renderY = Mth.lerp(entity.getLifeProgress(), RENDER_Y_AT_BIRTH, RENDER_Y_AT_DEATH) + Common.CONFIG.getFootprintYOffset();
 		// 瞄准判定框：与原版选中方块同源，仅当“当前确实可被选中（isPickable）”且准星命中的是本脚印时才画。
 		// hitResult 每客户端 tick 才刷新一次（框随准星的滞后与原版方块框一致），故再补一道 isPickable() 实时门：
 		// 切到手持物品/开始潜行的那一帧框立即消失，不必等下一 tick。
@@ -133,10 +134,7 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		// 对应关系：局部 -Z = 前进方向（贴图 v=0 那一侧）。
 		poseStack.mulPose(new Matrix4f().rotation(Axis.YP.rotationDegrees(180.0F - state.yawDeg)));
 		// 贴图沿实体 yaw 旋转后在局部 X 上关于原点对称（居中）：左右脚偏移已烘入实体坐标，此处不再平移。
-		// 缩放仅作用于贴图四边形的局部 X/Z（水平面），抬高量 renderY 已在之前提交到矩阵、不受影响；实体碰撞箱/判定框不变。
-		if (state.texScale > 0.0F) {
-			poseStack.scale(state.texScale, 1.0F, state.texScale);
-		}
+		// 尺寸直接由服务端下发的最终边长决定（见下方 half），故不再做位堆栈缩放；实体碰撞箱/判定框本就与贴图解耦、不受影响。
 
 		// 单个四边形：非高亮走原版实体半透明管线（采样 lightmap、应用天光、被方块遮挡、支持 alpha 混合）；
 		// 高亮走自定义脉冲管线（关深度穿墙、原色↔纯白闪烁、不受光照）。
@@ -145,8 +143,8 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 		// 顶点 alpha：非高亮=淡出系数×255（entityTranslucent 启用 SRC_ALPHA 混合，顶点 alpha 作为不透明度与背景叠加，
 		// 实现“越接近自动销毁越透明”；cutout 无混合、此值无效，故必须走 translucent）；高亮=脉冲值（由 fsh 当插值因子）。
 		int light = state.lightCoords;
-		// 基准半尺寸：配置的正方形边长之半（默认 5/16 的一半）；texScale 已由位堆栈缩放乘上
-		float half = Common.CONFIG.getFootprintTextureSize() * 0.5F;
+		// 半尺寸：服务端下发的最终边长之半（已含基准×倍率），客户端不再乘本地基准
+		float half = state.texSize * 0.5F;
 		if (state.highlighted) {
 			float pulse = (float) ((Math.sin(state.gameTime * 0.15) + 1.0) * 0.5); // 0..1 往复
 			int vertexAlpha = (int) (pulse * 255.0F);
@@ -224,7 +222,7 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity, Foo
 
 	public static class FootprintRenderState extends EntityRenderState {
 		public float yawDeg;
-		public float texScale;
+		public float texSize;
 		public float renderY;
 		public Identifier texture = FootprintRenderTypes.TEXTURE;
 		public boolean highlighted;
@@ -317,20 +315,16 @@ public class FootprintEntityRenderer extends EntityRenderer<FootprintEntity> {
 		}
 
 		poseStack.pushPose();
-		// 抬高并随存续下沉：按整段生命线性插值 0.02 -> 0.01
-		float renderY = Mth.lerp(entity.getLifeProgress(), RENDER_Y_AT_BIRTH, RENDER_Y_AT_DEATH);
+		// 抬高并随存续下沉（0.02 -> 0.01）+ 配置的全局贴图高度偏移（纯渲染，不影响实体坐标/判定盒/存续检测）
+		float renderY = Mth.lerp(entity.getLifeProgress(), RENDER_Y_AT_BIRTH, RENDER_Y_AT_DEATH) + Common.CONFIG.getFootprintYOffset();
 		poseStack.translate(0.0F, renderY, 0.0F);
 		// 绕 Y 旋转对齐朝向：原版 EntityRenderDispatcher 同款约定 rotationDegrees(180 - yaw)
 		poseStack.mulPose(Axis.YP.rotationDegrees(180.0F - entity.getYRot()));
-		// 缩放仅作用于贴图四边形所在的局部 X/Z（抬高量已先行提交、不受影响）
-		float texScale = entity.getTexScale();
-		if (texScale > 0.0F) {
-			poseStack.scale(texScale, 1.0F, texScale);
-		}
+		// 尺寸直接由服务端下发的最终边长决定（见下方 half），故不再做位堆栈缩放；实体碰撞箱/判定框本就与贴图解耦、不受影响
 
 		ResourceLocation texture = FootprintTextures.resolve(entity.getTextureName());
-		// 基准半尺寸：配置正方形边长之半；texScale 已由位堆栈缩放乘上
-		float half = Common.CONFIG.getFootprintTextureSize() * 0.5F;
+		// 半尺寸：服务端下发的最终边长之半（已含基准×倍率），客户端不再乘本地基准
+		float half = entity.getTexSize() * 0.5F;
 		Matrix4f matrix = poseStack.last().pose();
 		if (entity.isHighlighted()) {
 			// 高亮：穿墙 + 原色↔纯白脉冲。世界游戏时间（+插值）正弦作脉冲强度，随顶点色 alpha 传入着色器做 mix(texColor,white,pulse)。

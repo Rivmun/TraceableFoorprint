@@ -51,7 +51,7 @@
   "text.traceableprint.option.forwardOffsetList": "逐生物前后偏移",
   "text.traceableprint.option.forwardOffsetList.@Tooltip": "为特定生物设置前后偏移幅度。",
   "text.traceableprint.option.blockHeightList": "逐方块高度偏移",
-  "text.traceableprint.option.blockHeightList.@Tooltip": "为特定方块上的脚印应用额外偏移。不受服务端控制。",
+  "text.traceableprint.option.blockHeightList.@Tooltip": "为特定方块上的脚印应用额外高度偏移。",
 
   "text.traceableprint.category.texture": "自定义贴图",
   "text.traceableprint.option.textureList": "逐生物贴图覆写",

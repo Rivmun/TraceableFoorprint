@@ -187,13 +187,13 @@ public abstract class LivingEntityMixin {
 			targetYaw = (float) Math.toDegrees(Math.atan2(-movement.x, movement.z));
 		}
 
-		// 脚印放在父实体身后约 0.35 格处，贴地放置（抬高量走配置，减少与地面 z-fight）
+		// 脚印放在父实体身后约 0.35 格处、贴地放置（全局抬高量已改为纯渲染偏移，见 FootprintEntityRenderer，不再烘入实体坐标）
 		//【朝向】MC 实体 yaw 的前进向量是 (-sin(yaw), cos(yaw))（yaw=0 朝南 +Z、yaw=-90 朝东 +X），
 		// 所以“身后”是 +sin / -cos；写成 -sin / -cos 会把 X 分量镜像，导致东西走向时脚印落在身前。
 		double rad = Math.toRadians(targetYaw);
 		double behindX = parent.getX() + Math.sin(rad) * 0.35;
 		double behindZ = parent.getZ() - Math.cos(rad) * 0.35;
-		double footY = parent.getY() + Common.CONFIG.getFootprintYOffset();
+		double footY = parent.getY();
 
 		// 左右脚偏移：沿垂直于行进方向的侧向（前进 dir=(-sin,cos) 的法向 (cos,sin)）平移，随机取正负模拟左/右脚；
 		// 前后偏移：沿前进方向 dir=(-sin,cos) 平移，随机取正负（前/后错落）；两者同时、独立随机，直接烘入实体真实坐标，
@@ -243,9 +243,9 @@ public abstract class LivingEntityMixin {
 		footprint.setPos(spawnX, spawnY, spawnZ);
 		footprint.setYRot(targetYaw);
 		footprint.setXRot(parent.getXRot());
-		// 贴图缩放复用上面算好的 footprintScale（与左右/前后偏移同源）：服务端算好后走同步数据下发，
-		// 客户端仅缩放贴图四边形，不改实体碰撞箱/交互。
-		footprint.setTexScale(footprintScale);
+		// 贴图最终边长 = 基准尺寸 × 综合倍率（footprintScale 与左右/前后偏移同源）：整体在服务端算好后经同步数据下发，
+		// 客户端渲染器直接用该边长、不再读本地基准，故多人下贴图尺寸彻底以服务端为准；不改实体碰撞箱/交互。
+		footprint.setTexSize(Common.CONFIG.getFootprintTextureSize() * footprintScale);
 		// 脚印贴图替换：按注册名在 config.textureList 命中则从候选贴图名里随机取一个，服务端选定后走同步数据下发，
 		// 保证同一条脚印在所有玩家眼里是同一张贴图（也同一条链上左右脚/前后脚可以各不相同）。
 		// 未命中就不写（留空串）：客户端按默认 footprint.png 渲染；名字→资源路径的组装与存在性校验都在客户端做。
